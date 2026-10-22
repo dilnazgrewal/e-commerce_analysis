@@ -8,7 +8,7 @@
 > feature, dataset, decision or fix lands (rule in [CLAUDE.md](../CLAUDE.md), section "Documentation").
 > Each entry in the [timeline](#9-timeline) says which session did it.
 >
-> Last updated: **Thu 22 Oct 2026, ~20:10 IST**: cross-check against the main chat's transcript (docs session).
+> Last updated: **Thu 22 Oct 2026, ~20:35 IST**, after step 3 (rules engine, rules-only decisions) was committed (main build session).
 > Step 2 facts were added at 19:54 and 20:02 by the main build session.
 
 Sessions referred to below:
@@ -139,7 +139,9 @@ CLV, so the profit maths reflects long-term value.
 | Add a **third past campaign** (`CMP-MAR`) and use **small, regularised uplift trees** | Claude (step 2) | ~18:3x | Two campaigns gave too little data per offer type, and larger trees overfit when checked against the answer key |
 | **Report the models' weak spots openly** (per-offer uplift, sleeping dogs) | Claude flagged them; the user asked how the models were tested | 19:10–19:45 | Honest evaluation; the gaps change how step 3 chooses offers |
 | **Two sessions with separate file ownership**: build owns code and data, docs writes only in `docs/`, each stages only its own files | User (passed on by the main session) | 19:50 | Both sessions had committed in the same folder; this prevents one committing the other's work |
-| How step 3 chooses *which* offer | **Pending: the user decides** | — | See [§10](#10-open-items-and-the-users-to-dos) |
+| **Option A** for step 3: the uplift model picks *who* gets an offer; *which* offer comes from the measured campaign effects (per-person model only where it beat random: 2× points, free shipping) | User, after Claude explained both options and recommended A | ~20:12 | Every number the engine uses has passed a test; no schedule risk. Option B (better per-offer models) stays possible later and switches on automatically per offer type |
+| Rank offers by **expected profit**, with P(buy with offer) × cost (everyone who redeems gets the discount) | Claude (step 3), from the user's 60%-discount question | ~20:15 | Finds the cheapest offer that still works |
+| Untested offer types borrow the nearest tested type and are labelled **assumed** | Claude (step 3) | ~20:15 | No data for them yet; honesty in every explanation |
 
 The full approved plan is kept outside the repo at
 `C:\Users\HP\.claude\plans\d-desktop-hackathon-2-brief-pdf-https-g-abstract-pillow.md`. Its sections A–G and 1–12 are
@@ -560,9 +562,103 @@ order ₹2,444. Not yet backtested (does predicted 90-day value match what happe
 - The first step 2 summary to the user reported the ×1.69 headline but left out the per-offer weakness. Claude
   corrected this when the user asked how the models were tested (19:47).
 
+### Step 3 + 3b: rules engine and rules-only decisions (main build session, 20:13–20:35 IST)
+
+**Why this step exists.** The brief's core rule: business rules set the limits, and every offer (AI-chosen or
+not) is checked against them before it is sent. This step builds those rules, and a complete decision path that
+needs **no AI at all** (tiers T4–T6), so the bot keeps working even if Claude is unavailable.
+
+**How offers are chosen: Option A** (the user's decision, ~20:12, after Claude laid out both options; see §2).
+- **Who** gets an offer: the pooled uplift model, which passed its held-out test (×1.69).
+- **Which** offer: each offer type's *measured* campaign effect, scaled by the customer's responsiveness.
+  The per-person model is used only for types that beat random on held-out customers (re-derived from every
+  training report; today 2× points and free shipping).
+- Offer types never tested in a campaign borrow the nearest tested type and are labelled "assumed" in every
+  explanation (UPI cashback ≈ 0.8 × ₹ off; win-back ≈ % off; 2nd-order ≈ ₹ off; points-expiry ≈ nudge;
+  early access ≈ 0.8 × nudge).
+
+**Profit rule used to rank offers:**
+- expected profit = uplift × (order margin + retention value) − P(buy with offer) × cost if used − message cost
+- retention value = 0.5 × churn risk × the customer's usual quarterly margin
+- everyone who buys with the offer gets the discount, including people who would have bought anyway, so cost is
+  multiplied by P(buy with offer), not by the uplift
+
+**Files** (all in [backend/app/rules/](../backend/app/rules/)):
+
+| File | What it does |
+|---|---|
+| [default_policy.yaml](../backend/app/rules/default_policy.yaml) | The policy a marketer edits: contact limits, budget, targeting, category caps, the 10-offer menu, fallbacks, message rules, a Diwali override |
+| [schema.py](../backend/app/rules/schema.py) | Pydantic validation: typos (unknown keys), unknown offer types / lifecycles, min > default, or a fallback pointing to a missing offer are rejected on load |
+| [effects.py](../backend/app/rules/effects.py) | Option A uplift estimates and the profit maths, read from `calibration/model_report.json` |
+| [engine.py](../backend/app/rules/engine.py) | `validate()` returns **every** check with a plain-English reason; `menu()` lists the offers that pass all rules (Claude will only see this menu in step 4) |
+| [message_checks.py](../backend/app/rules/message_checks.py) | Layer L4: every number in a message must be a fact of the offer; banned phrases, false urgency, competitor names, links, contact details, emojis, length, language/script |
+| [templates.py](../backend/app/rules/templates.py) | Pre-approved messages for all 10 offer types × English / Hinglish / Punjabi (Gurmukhi), unique letter-only coupon codes |
+| [decide.py](../backend/app/rules/decide.py) | T4 → T5 → T6 decision pipeline |
+| [context.py](../backend/app/rules/context.py) | Builds each customer's context from `customer_scores` + `customers`, and their offer history from `offer_decisions` |
+
+New table `offer_decisions`: the audit log (decision, tier, status, offer, message, economics, every rule check,
+explanation). New column `uplift_any` in `customer_scores`: the pooled model's per-customer uplift.
+
+**Default policy (summary):**
+- Contact: quiet hours 21:00–09:00; ≤ 2 offers per 7 days; ≥ 2 days between offers; 2-day cool-down after a
+  purchase; no stacking; 10% random holdout; ₹0.5 per message.
+- Budget: ₹50,000 per day (×2 during Dhanteras/Diwali, 1–8 Nov); ≤ ₹500 per offer; expected cost ≤ 50% of
+  90-day margin value (floor ₹60).
+- Targeting: never contact sleeping dogs; sure things only get non-discount rewards; expected profit must be
+  ≥ ₹0; new accounts (< 14 days) ≤ ₹150.
+- Category caps (max discount % of the order): Electronics 5, Phones 4, Fashion 35, Beauty 25, Home 18,
+  Grocery 6, Health 15, Sports 20, Toys 20, Books 12. Diwali: Electronics 7, Fashion 40, Home 22.
+- Fallbacks (T5): new → ₹100 off 2nd order; VIP → 2× points; at-risk → free delivery; lapsed and
+  window-shoppers → reminder; active and bargain-hunters → nothing.
+
+**Rule checks, by layer:**
+- Contact (8): not opted out, not in holdout, uplift group contactable, frequency cap, gap between offers, no
+  stacking, purchase cool-down, quiet hours.
+- Offer (up to 16): offer enabled, value in range, lifecycle allowed, COD-only, has expiring points,
+  sure-thing no discount, category known, category discount cap, max ₹ discount, max cost per offer, CLV cost cap,
+  new-account guard, daily budget, min expected profit, validity window.
+- Message (11): not empty, length, numbers match, banned phrases, false urgency, competitors, links, contact
+  details, emoji limit, language matches, mentions code.
+
+**Tiers:**
+- **T6 gates first.** Holdout → `holdout`; only quiet hours → `queued`; any other contact rule → `suppressed`.
+- **T4:** the menu offer with the highest expected profit, with its template message, re-validated together.
+- **T5:** the lifecycle fallback (all rules except the profit bar).
+- **T6:** otherwise nothing is sent, with the reason logged.
+
+**Results on the real scored customers** (`scripts/decide.py --sample 500`, 23 Oct 11:00 IST, nothing saved):
+
+| Outcome | Customers |
+|---|---|
+| T4 sent (best expected profit) | 256 |
+| T5 sent (marketer fallback) | 130 |
+| T6 suppressed (no profitable offer and no fallback, or a contact rule) | 74 |
+| T6 holdout | 40 (8%; the expected share is 10%) |
+
+- **Offers chosen:** 2× points 169 · reminder 166 · free delivery 44 · ₹100 off 4 · ₹100 off 2nd order 2 · 10% off 1.
+- **Expected cost ₹1,734, expected profit ₹7,844** for the 386 sent.
+- **Languages:** English 193, Hinglish 176, Punjabi 17.
+- **Diwali** (4 Nov, same customers): 394 sent, expected profit ₹8,175.
+- **Why discounts are rare:** the measured discount effects (+6.1 to +6.3 pp) are only slightly larger than a free
+  reminder's (+3.8 pp) and 2× points (+5.6 pp), but they cost real money. This is the "cheapest offer that works"
+  principle from §1.1.
+
+Example decisions:
+- **C02588** (Ishwar, §1.1) → T6 holdout: no offer, so he counts towards measuring true lift.
+- **C00067** (VIP) → T4: a reminder in Hinglish ("Namaste Urishilla! Aapke pasand ke items abhi bhi aapka intezaar
+  kar rahe hain."), +8.6 pp expected uplift (62.4% → 71.0%), ₹0 cost, expected profit ₹58.8, 26/26 checks ✓.
+
+**Limits and honest notes:**
+- The uplift for untested offer types is an assumption, and is labelled as one. The value elasticity (0.5) for
+  deeper or shallower discounts is also an assumption.
+- Messages are template-only for now; Claude-written messages arrive in step 4 and must pass the same L4 checks.
+- The daily budget is enforced per decision against what is already logged; the transaction-safe send-time
+  re-check (L5) comes with the bot in step 5.
+- Holdout came out at 8% in this 500-customer sample and 10% over 5,000 (stable hash of the customer ID).
+
 ### Quality and safety so far
 
-- **26 tests pass** (after the step 2 commit), and ruff lint is clean. The tests cover:
+- **100 tests pass** (after the step 3 commit), and ruff lint is clean. The tests cover:
   - bot handlers
   - the health endpoint
   - BG/NBD parameter recovery
@@ -577,6 +673,9 @@ order ₹2,444. Not yet backtested (does predicted 90-day value match what happe
   - features never use future rows; open-cart and profile features
   - Qini rewards a model that ranks true responders first; ATE confidence intervals
   - uplift-group and lifecycle rules; P(alive) falls when a customer goes quiet; readable reason text
+  - **rules (step 3):** a compliant offer passes; each of 19 violations fails exactly its rule; holdout share; frequency cap, gap and stacking; Diwali cap override; menu only holds valid offers, sorted by profit; Option A uses measured effects except trusted types; T4/T5/T6 tiers; policy typos rejected
+  - **messages:** each of 12 message rules; Punjabi/Hinglish script detection; coupon codes never count as numbers; every template × language (30 cases) passes the checks
+  - **property tests (Hypothesis):** 10,000 random or near-valid proposals and 2,000 full decisions. An independently written checker confirms that nothing approved breaks a rule, and every number in every sent message is a fact of the offer (~380 approved boundary cases and ~600 sent decisions per run)
 - **Secrets:**
   - `.env` is git-ignored, and keys are checked by format and length, never printed
   - every commit's staged diff was scanned for `sk-ant-` and bot-token patterns before committing
@@ -739,7 +838,9 @@ uv sync                                                     # Python 3.12 env + 
 uv run python ../scripts/bootstrap_data.py                  # sample real data → data/raw/ → calibration/ (~55 MB download)
 uv run python ../scripts/seed_db.py --customers 5000 --seed 42 --as-of 2026-10-22   # DB + realism report
 uv run python ../scripts/train_models.py                    # churn/uplift/CLV/segments → customer_scores (~6 min)
-uv run pytest                                               # tests
+uv run python ../scripts/decide.py C02588                   # rules-only decision for one customer, every check shown
+uv run python ../scripts/decide.py --sample 500             # summary over 500 customers (add --save to log them)
+uv run pytest                                               # tests (~2 min, property tests included)
 uv run uvicorn app.main:app --reload                        # API → http://localhost:8000/docs
 uv run python -m app.bot.telegram_bot                       # bot (only ONE copy at a time)
 cd ../frontend && npm install && npm run dev                # dashboard → http://localhost:5173
@@ -765,6 +866,9 @@ cd ../frontend && npm install && npm run dev                # dashboard → http
 | 18:5x | Hillstrom conversions (0.5% rate) underfit with the small trees (×0.87) | Larger trees for the 64k-row Hillstrom data (×1.24) |
 | 19:0x | CLV was `NaN` for never-bought customers; reason text said "Only 0 visits" | Prior purchase rate for never-bought; reason text rewritten ("No visits in the last 30 days") |
 | 19:50 | Both sessions committed in the same folder; the main session had been staging with `git add -A` | Each session now stages only its own files by name (see CLAUDE.md, "Two sessions") |
+| 20:2x | Correct Punjabi messages failed the language check: Gurmukhi vowel signs are Unicode *marks*, not letters, and the coupon code's Latin letters were counted | Marks are counted with letters, and the coupon code is removed before checking the script |
+| 20:2x | The first property test was nearly empty: only 0.04% of random proposals were approved (~4 of 10,000), so it proved little | Half the proposals are now near-valid menu offers with fields pushed past their limits: ~3.8% approved (~380 boundary cases); decisions ~30% sent |
+| 20:1x | Circular import between the engine and the message checks | `Check` moved into its own module |
 
 ## 9. Timeline
 
@@ -818,6 +922,9 @@ All times IST, Thu 22 Oct 2026.
   - the offer-type table, the full test plan, the extra features, a Model scorecard page and the build schedule
   - timeline lines for 19:16–20:00
   Times were corrected from git. No recorded numbers changed.
+- **~20:05, main:** the user asks for both step 3 options explained before choosing. Claude lays out Option A (model picks *who*, measured effects pick *which*) vs Option B (improve per-offer models first: 2–4 h, uncertain payoff) and recommends A, with B later if time allows.
+- **~20:12, main:** the user chooses **Option A**. Step 3 starts.
+- **20:13–20:35, main:** policy file and schema, Option A effects, rules engine, message checks, templates (EN/Hinglish/Punjabi), T4–T6 pipeline, `offer_decisions` table, `decide.py` CLI. Models retrained to store `uplift_any`. 100 tests pass. Step 3 committed.
 
 ## 10. Open items and the user's to-dos
 
@@ -832,7 +939,9 @@ All times IST, Thu 22 Oct 2026.
       generated; until then the bot polls from the laptop.
 - [ ] Later steps will ask for: checking the default margins and discount caps, the bot's voice and languages, and
       3–5 classmate testers.
-- [ ] **Decide for step 3:** model picks *who* gets an offer, measured campaign effects pick *which* offer (proposed by Claude), or improve the per-offer models first.
+- [x] ~~Decide for step 3~~: the user chose Option A (~20:12).
+- [ ] Review the default policy (category caps, budget, fallbacks) in `backend/app/rules/default_policy.yaml`.
+- [ ] Optional, if time allows before Tuesday: Option B (improve per-offer uplift models; per-offer types switch over automatically once they beat random on held-out customers).
 
 ## 11. Headline numbers (for the 2-page PDF)
 
@@ -846,6 +955,9 @@ All times IST, Thu 22 Oct 2026.
 | Offer effects (measured, randomised) | +3.8 pp (nudge) to +6.3 pp (₹100 off) extra 14-day purchase rate |
 | Uplift targeting | Top 30% get 1.69× the average uplift (held out); method confirmed on real Hillstrom data (×1.35 visits, ×1.24 purchases) |
 | Known weak spot | Per-person *which offer* is unreliable for 3 of 5 offer types; sleeping dogs not identifiable |
-| Tests | 26 passing; lint clean |
+| Rules engine | 10-offer menu; 35 rule checks across contact, offer and message; Diwali override; T4–T6 work with no AI |
+| Rules-only decisions (500 customers) | 386 sent (256 best profit, 130 marketer fallback), 74 suppressed, 40 holdout; expected cost ₹1,734 for ₹7,844 expected profit; EN / Hinglish / Punjabi |
+| Rule safety | 10,000 + 2,000 property-test cases; no approved offer or sent message broke a rule |
+| Tests | 100 passing; lint clean |
 | Bot | @Dilnazecom_bot, live in polling mode |
 | Safety design | 7 guardrail layers, 6-tier fallback (3 tiers without AI), models blocked from ground truth |

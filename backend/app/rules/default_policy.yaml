@@ -1,0 +1,101 @@
+# OfferIQ offer policy: the limits every offer must stay within, AI-chosen or not.
+#
+# Written for the marketing team: change a number here (or in the dashboard's Rules Studio, later), and the
+# next decision follows it. Money is in ₹. Times are IST.
+
+version: 1
+name: Default policy (festive season 2026)
+updated_by: system
+updated_at: 2026-10-22
+
+contact:
+  quiet_hours: {start: "21:00", end: "09:00"}   # never message people at night
+  max_offers_per_7_days: 2                      # frequency cap per customer
+  min_days_between_offers: 2
+  cooldown_after_purchase_days: 2               # don't send a discount right after they bought
+  holdout_share: 0.10                           # random 10% get no offers, so we can measure true lift
+  message_cost_inr: 0.5                         # cost of one message, counted in profit
+
+budget:
+  daily_inr: 50000                              # total expected offer cost per day
+  max_cost_per_offer_inr: 500                   # no single offer may cost more than this
+  max_cost_share_of_clv: 0.5                    # expected cost ≤ 50% of the customer's 90-day margin value…
+  clv_cap_floor_inr: 60                         # …but small offers up to ₹60 are always allowed
+
+targeting:
+  never_contact_uplift_groups: [sleeping_dog]   # contacting them makes them buy less
+  sure_thing_allowed_types: [BONUS_POINTS, EARLY_ACCESS, POINTS_EXPIRY, CART_NUDGE]   # no discounts for them
+  min_expected_profit_inr: 0                    # an offer must be expected to make money
+  retention_value_weight: 0.5                   # how much a purchase that also prevents churn is worth
+  new_account_days: 14                          # fraud guard for brand-new accounts…
+  new_account_max_cost_inr: 150                 # …which get small offers only
+
+# Maximum discount as % of the order, per category. Always set below the category's gross margin.
+categories:
+  Electronics: {max_discount_pct: 5}
+  Cell_Phones_and_Accessories: {max_discount_pct: 4}
+  Clothing_Shoes_and_Jewelry: {max_discount_pct: 35}
+  Beauty_and_Personal_Care: {max_discount_pct: 25}
+  Home_and_Kitchen: {max_discount_pct: 18}
+  Grocery_and_Gourmet_Food: {max_discount_pct: 6}
+  Health_and_Household: {max_discount_pct: 15}
+  Sports_and_Outdoors: {max_discount_pct: 20}
+  Toys_and_Games: {max_discount_pct: 20}
+  Books: {max_discount_pct: 12}
+
+# The offer menu. `value` is a % for PCT_OFF / WIN_BACK, ₹ for FLAT_OFF / SECOND_ORDER / UPI_CASHBACK,
+# a points multiplier for BONUS_POINTS, and 0 for offers that cost nothing directly.
+offers:
+  - {id: nudge, type: CART_NUDGE, label: "Reminder (no discount)", value: {min: 0, max: 0, default: 0},
+     validity_days: 3}
+  - {id: points2x, type: BONUS_POINTS, label: "Bonus reward points", value: {min: 2, max: 5, default: 2},
+     validity_days: 7}
+  - {id: freeship, type: FREE_SHIPPING, label: "Free delivery", value: {min: 40, max: 40, default: 40},
+     validity_days: 7}
+  - {id: pct10, type: PCT_OFF, label: "% off", value: {min: 5, max: 15, default: 10}, min_order_inr: 499,
+     max_discount_inr: 300, validity_days: 7}
+  - {id: flat100, type: FLAT_OFF, label: "₹ off", value: {min: 50, max: 200, default: 100}, min_order_inr: 699,
+     validity_days: 7}
+  - {id: upi50, type: UPI_CASHBACK, label: "UPI cashback", value: {min: 25, max: 100, default: 50},
+     min_order_inr: 499, validity_days: 7, only_cod_customers: true}
+  - {id: winback15, type: WIN_BACK, label: "Win-back % off", value: {min: 10, max: 25, default: 15},
+     min_order_inr: 699, max_discount_inr: 400, validity_days: 10, only_lifecycles: [lapsed, at_risk]}
+  - {id: second100, type: SECOND_ORDER, label: "₹ off your 2nd order", value: {min: 50, max: 150, default: 100},
+     min_order_inr: 499, validity_days: 14, only_lifecycles: [new]}
+  - {id: pointsexpiry, type: POINTS_EXPIRY, label: "Points expiry reminder", value: {min: 0, max: 0, default: 0},
+     validity_days: 7, requires_expiring_points: true}
+  - {id: earlyaccess, type: EARLY_ACCESS, label: "Early sale access", value: {min: 0, max: 0, default: 0},
+     validity_days: 5, only_lifecycles: [vip, active]}
+
+# T5: the marketer's fallback per lifecycle stage, used when no offer clears the profit bar.
+# `none` means: send nothing.
+fallbacks:
+  new: second100
+  vip: points2x
+  active: none
+  at_risk: freeship
+  lapsed: nudge
+  window_shopper: nudge
+  bargain_hunter: none
+
+messages:
+  max_length: 350
+  max_emojis: 3
+  languages: [en, hi-Latn, pa]
+  allowed_link_domains: []                      # no links in offer messages yet
+  banned_phrases: ["guaranteed", "free money", "risk-free", "100% free", "act now or lose", "you have won"]
+  false_urgency_patterns:
+    - "only \\d+ left"
+    - "last \\d+ (items|pieces|units)"
+    - "selling fast"
+    - "ends in \\d+ (minutes|mins|seconds)"
+    - "almost sold out"
+  competitors: [Flipkart, Meesho, Myntra, Ajio, Nykaa, Snapdeal, JioMart, BigBasket, Blinkit, Zepto, Tata Cliq]
+
+# Time-boxed overrides. Inside the window, these category caps and the budget multiplier apply.
+festive:
+  - name: Dhanteras / Diwali 2026
+    start: 2026-11-01
+    end: 2026-11-08
+    budget_multiplier: 2.0
+    category_caps: {Electronics: 7, Clothing_Shoes_and_Jewelry: 40, Home_and_Kitchen: 22}

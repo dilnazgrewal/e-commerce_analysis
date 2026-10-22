@@ -41,6 +41,7 @@ def run_pipeline(engine: Engine, as_of: datetime, log=print) -> tuple[pd.DataFra
     scores["p_buy_14d_no_offer"] = baseline
     for offer_type in uplift.columns:
         scores[f"uplift_{offer_type}"] = uplift[offer_type].to_numpy()
+    scores["uplift_any"] = uplift_model.predict_any(features)
     scores["best_offer_type"] = uplift.idxmax(axis=1).to_numpy()
     scores["uplift_best"] = uplift.max(axis=1).to_numpy()
     thresholds = uplift_thresholds(scores["uplift_best"].to_numpy(), baseline)

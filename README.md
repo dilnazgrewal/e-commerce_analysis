@@ -90,6 +90,45 @@ cd backend && uv run python ../scripts/train_models.py   # ~5 min → customer_s
 Full numbers: [calibration/model_report.json](calibration/model_report.json) and
 [docs/PROJECT_LOG.md](docs/PROJECT_LOG.md) §5.
 
+## Rules engine: the limits every offer must stay within
+
+The marketing team's policy lives in one readable file,
+[backend/app/rules/default_policy.yaml](backend/app/rules/default_policy.yaml). It covers:
+- quiet hours, frequency caps and the purchase cool-down
+- a random 10% holdout
+- daily budget and per-offer cost caps
+- maximum discount per category (always below the margin)
+- a 10-offer menu
+- fallbacks per customer stage
+- message rules
+- a Diwali override
+
+Every proposed offer runs through up to **35 named checks** (contact, offer and message) and gets a plain reason
+for each one. A message fails, for example, if any number in it isn't a fact of the offer, or if it uses false
+urgency or names a competitor.
+
+How an offer is chosen (rules-only tiers; Claude is added in front in step 4 and goes through the same checks):
+1. **T6 gates:** holdout, opt-out, quiet hours (queued), frequency, cool-down, sleeping dogs → no offer.
+2. **T4:** the allowed offer with the highest **expected profit** = uplift × (order margin + retention value) −
+   P(buy with offer) × cost. Uplift is "model picks *who*, measured A/B effects pick *which*".
+3. **T5:** the marketer's fallback for the customer's lifecycle stage.
+4. **T6:** nothing, with the reason logged.
+
+```bash
+cd backend
+uv run python ../scripts/decide.py C00067            # one decision with every rule check
+uv run python ../scripts/decide.py --sample 500      # summary over 500 customers
+```
+
+Over 500 real scored customers:
+- **386** get an offer (256 best-profit, 130 fallback), **74** get nothing, **40** are held out.
+- Expected cost ₹1,734 for ₹7,844 expected profit.
+- Cheap offers dominate (2× points, reminders, free delivery). The measured effect of a discount is only slightly
+  bigger than a free reminder's, so the engine picks the cheapest offer that still works.
+
+Safety is property-tested: 10,000 random and near-valid proposals plus 2,000 full decisions, checked by an
+independently written checker. Nothing approved broke a rule, and every number in every message matched its offer.
+
 ## Project guide
 
 See [CLAUDE.md](CLAUDE.md) for architecture, rules, conventions, and build progress.

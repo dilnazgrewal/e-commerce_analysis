@@ -106,6 +106,34 @@ class CampaignAssignment(SQLModel, table=True):
     valid_until: datetime
 
 
+class OfferDecision(SQLModel, table=True):
+    """Audit log: every decision OfferIQ makes, with every rule check, whether or not an offer was sent."""
+
+    __tablename__ = "offer_decisions"
+
+    decision_id: str = Field(primary_key=True)
+    customer_id: str = Field(index=True, foreign_key="customers.customer_id")
+    created_at: datetime = Field(index=True)
+    trigger: str
+    tier: str  # T1..T6
+    status: str = Field(index=True)  # sent | holdout | queued | suppressed | claimed | dismissed
+    offer_id: str | None = None
+    offer_type: str | None = None
+    offer_value: float | None = None
+    category: str | None = None
+    code: str | None = None
+    valid_until: datetime | None = None
+    message_lang: str | None = None
+    message_text: str | None = None
+    expected_cost_inr: float | None = None
+    expected_profit_inr: float | None = None
+    uplift: float | None = None
+    policy_version: int
+    rule_checks: str  # JSON list of {rule, passed, reason}
+    explanation: str  # JSON: why this offer (or none), shown in the dashboard and "Why me?"
+    ai: str | None = None  # JSON: model, attempts, reasons (step 4)
+
+
 class SimHiddenTrait(SQLModel, table=True):
     """Simulator ground truth. Analytics and models must NEVER read this table."""
 

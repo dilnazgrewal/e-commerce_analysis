@@ -84,6 +84,11 @@ cd frontend && npm install && npm run dev           # dashboard on http://localh
 - Python 3.12, full type hints, Pydantic v2 models for every boundary (API, policy, Claude I/O), ruff for lint/format.
 - Money is integer **₹ (INR)**, formatted `en-IN` (₹1,49,999). Time is **IST (Asia/Kolkata)**: the DB stores
   naive IST wall-clock datetimes; the API attaches `+05:30` at the boundary.
+- Rules: the policy is `backend/app/rules/default_policy.yaml` (validated by `schema.py`, unknown keys rejected).
+  `engine.validate()` returns every `Check(rule, passed, reason)`; `engine.menu()` is the only list of offers
+  Claude may choose from. Offer choice is **Option A** (user's decision): pooled uplift model for *who*, measured
+  campaign effects for *which* (`rules/effects.py`); per-person models only where they beat random on held-out
+  data. New rules need a unit test in `tests/test_rules.py` and an invariant in `tests/test_property.py`.
 - Models: `scripts/train_models.py` → `customer_scores` + `model_runs` tables and `calibration/model_report.json`.
   Features are point-in-time (`build_features(tables, as_of)` only sees rows before `as_of`). Uplift is learned
   from the platform's past randomised campaigns (`campaign_assignments`), never from hidden traits; the
@@ -130,8 +135,8 @@ The user runs a **main build session** and a **docs session** side by side. Cont
 - [x] 0  Repo skeleton, CLAUDE.md, README, bot replies to /start (@Dilnazecom_bot)
 - [x] 1  Data ingest + calibration + synthetic generator + realism report
 - [x] 2  Features, churn, uplift (validated on Hillstrom), CLV, segments (`scripts/train_models.py`)
-- [ ] 3  Policy schema, rules engine, message checks, property tests
-- [ ] 3b Rules-only next-best-offer (T4), segment fallbacks (T5), templates — works with no AI
+- [x] 3  Policy schema, rules engine, message checks, property tests (`backend/app/rules/`)
+- [x] 3b Rules-only next-best-offer (T4), segment fallbacks (T5), templates — works with no AI (`scripts/decide.py`)
 - [ ] 4  Claude offer agent + harness (L0–L6) + T1–T3 + audit log + red-team tests
 - [ ] 4b Health: independent re-checker, canary customers, golden evals
 - [ ] 5  Full Telegram flow (quiz → digital twin → browse → offer card → feedback, holdout)
