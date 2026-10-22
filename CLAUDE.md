@@ -96,6 +96,16 @@ cd frontend && npm install && npm run dev           # dashboard on http://localh
   text, invalid JSON, timeouts, 429/500) asserting the correct guardrail layer and fallback tier fire.
 - Small commits, imperative messages (`Add rules engine frequency cap`).
 
+## Documentation (always keep current)
+
+`docs/PROJECT_LOG.md` is the project's record; the user builds the final submission PDF from it. Whenever a step,
+feature, dataset, model result, decision, or notable fix lands, update it **in the same commit** as the work:
+- what was built and where (file links), with the real numbers from the run (counts, metrics, ₹, pass/fail);
+- where data or parameters came from (source, procedure, seed) and any assumption added to `india.yaml`;
+- decisions with who made them (user or Claude) and why; problems hit and how they were fixed;
+- a timeline line (IST time, which session) and the "Last updated" stamp; keep §11 headline numbers current.
+Never put secrets, tokens, or `.env` values in it.
+
 ## Progress
 
 - [x] Plan approved (full plan: section-by-section in the planning session)
