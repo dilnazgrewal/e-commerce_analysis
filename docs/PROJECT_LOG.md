@@ -8,8 +8,8 @@
 > feature, dataset, decision or fix lands (rule in [CLAUDE.md](../CLAUDE.md), section "Documentation").
 > Each entry in the [timeline](#9-timeline) says which session did it.
 >
-> Last updated: **Thu 22 Oct 2026, ~20:35 IST**, after step 3 (rules engine, rules-only decisions) was committed (main build session).
-> Step 2 facts were added at 19:54 and 20:02 by the main build session.
+> Last updated: **Thu 22 Oct 2026, ~20:40 IST**: step 3 entries checked against the code (docs session).
+> Step 3 facts were added at 20:31 by the main build session.
 
 Sessions referred to below:
 - **Main build session**: the planning-and-build chat ("E-commerce analysis system"). It wrote the plan and
@@ -137,7 +137,7 @@ CLV, so the profit maths reflects long-term value.
 | Optional Kaggle "Amazon Sales (India)" and RetailRocket funnel data **not used** | Claude (no Kaggle login was set up) | 15:23 | The plan made them optional; the funnel uses published benchmark ratios instead (e.g. ~70% cart abandonment, §4.3) |
 | Offer effects learned only from **past randomised campaigns** in the simulated history | Claude (step 2) | ~17:20 | Real platforms learn uplift from their own A/B tests; models must never read the hidden traits |
 | Add a **third past campaign** (`CMP-MAR`) and use **small, regularised uplift trees** | Claude (step 2) | ~18:3x | Two campaigns gave too little data per offer type, and larger trees overfit when checked against the answer key |
-| **Report the models' weak spots openly** (per-offer uplift, sleeping dogs) | Claude flagged them; the user asked how the models were tested | 19:10–19:45 | Honest evaluation; the gaps change how step 3 chooses offers |
+| **Report the models' weak spots openly** (per-offer uplift, sleeping dogs) | Claude flagged them; the user asked how the models were tested | 19:16–19:47 | Honest evaluation; the gaps change how step 3 chooses offers |
 | **Two sessions with separate file ownership**: build owns code and data, docs writes only in `docs/`, each stages only its own files | User (passed on by the main session) | 19:50 | Both sessions had committed in the same folder; this prevents one committing the other's work |
 | **Option A** for step 3: the uplift model picks *who* gets an offer; *which* offer comes from the measured campaign effects (per-person model only where it beat random: 2× points, free shipping) | User, after Claude explained both options and recommended A | ~20:12 | Every number the engine uses has passed a test; no schedule risk. Option B (better per-offer models) stays possible later and switches on automatically per offer type |
 | Rank offers by **expected profit**, with P(buy with offer) × cost (everyone who redeems gets the discount) | Claude (step 3), from the user's 60%-discount question | ~20:15 | Finds the cheapest offer that still works |
@@ -366,9 +366,11 @@ step 2. Postgres (Neon) in the cloud. The file can be opened with the free DB Br
 | `campaign_assignments` | 12,469 | Who got which offer in the 3 past randomised campaigns (step 2) |
 | `customer_scores` | 5,000 | Model output per customer: churn, uplift, CLV, segment (step 2) |
 | `model_runs` | 1 per training run | The full report of each training run (step 2) |
+| `offer_decisions` | 1 per saved decision | The audit log: tier, status, offer, message, economics, every rule check, explanation (step 3; empty until decisions are saved with `--save` or sent by the bot) |
 | `sim_hidden_traits` | 5,000 | The answer key; models must never read it |
 
-Row counts were reported in the main session at 19:16 IST.
+Row counts were reported in the main session at 19:16 IST. Step 3 added the `uplift_any` column to
+`customer_scores` (the pooled model's uplift per customer).
 
 ### 4.7 Realism report ([realism.py](../backend/app/data/realism.py) → [calibration/realism_report.json](../calibration/realism_report.json))
 
@@ -549,9 +551,9 @@ order ₹2,444. Not yet backtested (does predicted 90-day value match what happe
 
 - **Which offer** is not reliable per person for 10% off, ₹100 off and nudges (about 1,600 customers per arm is too
   little to learn separate patterns). The `best_offer_type` column should not be trusted yet.
-- **Proposed for step 3 (awaiting the user's decision):** use the model for *who* gets an offer, and the measured
-  campaign effects above for *which* offer, switching to a per-person model only for offer types that beat random
-  on held-out customers (currently 2× points and free shipping).
+- **Chosen for step 3 (Option A, the user's decision at ~20:12):** use the model for *who* gets an offer, and the
+  measured campaign effects above for *which* offer, switching to a per-person model only for offer types that beat
+  random on held-out customers (currently 2× points and free shipping).
 - **Sleeping dogs cannot be singled out.** Protect them with frequency caps and holdout groups, not the label.
 - **Uplift is short-term** (14-day purchase), not long-term retention; step 3 combines it with churn and CLV.
 - Churn is miscalibrated in the middle range (19% predicted vs 30% observed).
@@ -614,7 +616,7 @@ explanation). New column `uplift_any` in `customer_scores`: the pooled model's p
 **Rule checks, by layer:**
 - Contact (8): not opted out, not in holdout, uplift group contactable, frequency cap, gap between offers, no
   stacking, purchase cool-down, quiet hours.
-- Offer (up to 16): offer enabled, value in range, lifecycle allowed, COD-only, has expiring points,
+- Offer (up to 16): offer exists on the menu, offer enabled, value in range, lifecycle allowed, COD-only, has expiring points,
   sure-thing no discount, category known, category discount cap, max ₹ discount, max cost per offer, CLV cost cap,
   new-account guard, daily budget, min expected profit, validity window.
 - Message (11): not empty, length, numbers match, banned phrases, false urgency, competitors, links, contact
@@ -696,6 +698,10 @@ Example decisions:
 | L6 Live monitor | An independent re-checker, plus a kill switch |
 
 Limits on Claude itself: 8 s timeout, at most 6 tool calls, a circuit breaker, a daily token budget.
+
+Already built in step 3: the rule side of **L1** (the menu), **L3** (business rules) and **L4** (message checks), plus
+tiers **T4–T6**. Still to come: L0, L2, L5, L6 and T1–T3, which arrive with the Claude agent (step 4) and the bot
+(step 5).
 
 **Fallback ladder (T1–T6):**
 1. **T1:** Sonnet agent
@@ -822,8 +828,8 @@ rules + AI beats blanket discounting. A CLV backtest is also planned.
 | 0 | Thu 22 | Skeleton, CLAUDE.md, README, bot replies to /start | ✅ Done |
 | 1 | Thu–Fri | Data ingest, calibration, generator, realism report | ✅ Done (Thu) |
 | 2 | Fri | Features, churn, uplift (validated on Hillstrom), CLV, segments | ✅ Done (Thu) |
-| 3 / 3b | Fri–Sat | Policy schema, rules engine, property tests; rules-only fallback (T4–T6) | Next, waiting on the user's decision |
-| 4 / 4b | Sat | Claude offer agent with guardrails and T1–T3, audit log; health checks | Planned |
+| 3 / 3b | Fri–Sat | Policy schema, rules engine, property tests; rules-only fallback (T4–T6) | ✅ Done (Thu, `c862c80`) |
+| 4 / 4b | Sat | Claude offer agent with guardrails and T1–T3, audit log; health checks | Next |
 | 5 | Sat | Full Telegram flow (quiz → twin → offer card → feedback, holdout) | Planned |
 | 6 | Sat–Sun | React dashboard, API, live updates (SSE) | Planned |
 | 7 | Sun | Plain-English rule editing with dry run, campaigns, policy simulation, AI analyst, two-way chat | Planned |
@@ -913,7 +919,8 @@ All times IST, Thu 22 Oct 2026.
   lists the gaps; the user approves adding the per-category table, the concepts section and a transcript export.
 - **20:00–20:02, main:** per-category data table (§4.1) and plain-English concepts (§1.1) added (`ae3e815`); the main
   chat's transcript exported to `docs/transcripts/` (git-ignored, for cross-checking only).
-- **~20:10, docs:** log cross-checked against the transcript and the approved plan. Added:
+- **~20:05, main:** the user asks for both step 3 options explained before choosing. Claude lays out Option A (model picks *who*, measured effects pick *which*) vs Option B (improve per-offer models first: 2–4 h, uncertain payoff) and recommends A, with B later if time allows.
+- **20:05, docs:** log cross-checked against the transcript and the approved plan (`e05cb16`). Added:
   - five decisions: the user chose the sampling method and the 10 categories; Kaggle data not used; no-AI tiers
     first; real-time checks were the user's request
   - the full input/output contract
@@ -922,9 +929,13 @@ All times IST, Thu 22 Oct 2026.
   - the offer-type table, the full test plan, the extra features, a Model scorecard page and the build schedule
   - timeline lines for 19:16–20:00
   Times were corrected from git. No recorded numbers changed.
-- **~20:05, main:** the user asks for both step 3 options explained before choosing. Claude lays out Option A (model picks *who*, measured effects pick *which*) vs Option B (improve per-offer models first: 2–4 h, uncertain payoff) and recommends A, with B later if time allows.
-- **~20:12, main:** the user chooses **Option A**. Step 3 starts.
-- **20:13–20:35, main:** policy file and schema, Option A effects, rules engine, message checks, templates (EN/Hinglish/Punjabi), T4–T6 pipeline, `offer_decisions` table, `decide.py` CLI. Models retrained to store `uplift_any`. 100 tests pass. Step 3 committed.
+- **~20:12, main:** the user chooses **Option A**. Step 3 starts. (The user also said "go with option A" in the
+  docs chat, after it had already been chosen here; the docs session only writes documentation, so nothing was
+  built twice.)
+- **20:13–20:35, main:** policy file and schema, Option A effects, rules engine, message checks, templates (EN/Hinglish/Punjabi), T4–T6 pipeline, `offer_decisions` table, `decide.py` CLI. Models retrained to store `uplift_any`. 100 tests pass. Step 3 committed (`c862c80`, 20:31).
+- **~20:40, docs:** step 3 entries checked against the code. All 35 rule checks and the default-policy values
+  match; "offer exists on the menu" added to the offer-layer list. Updated the parts that step 3 made stale: build
+  schedule, the step 2 "awaiting decision" note, the `offer_decisions` table, and which guardrail layers are built.
 
 ## 10. Open items and the user's to-dos
 
