@@ -88,3 +88,29 @@ def load_history(engine: Engine, customer_id: str, now: datetime) -> History:
         for r in rows
     ]
     return History(offers, float(spent or 0))
+
+
+def load_activity(engine: Engine, customer_id: str, now: datetime) -> dict:
+    """Recent behaviour for the agent's get_recent_activity tool (titles cleaned: they come from listings)."""
+    from app.agent.guard import clean
+
+    frame = pd.read_sql(
+        text(
+            "SELECT e.type, e.ts, e.session_id, e.query, p.title "
+            "FROM events e LEFT JOIN products p USING(product_id) "
+            "WHERE e.customer_id = :c AND e.ts >= :since AND e.ts < :now ORDER BY e.ts DESC"
+        ),
+        engine,
+        params={"c": customer_id, "since": now - timedelta(days=14), "now": now},
+    )
+    if frame.empty:
+        return {"recent_views": [], "recent_searches": [], "left_in_cart": [], "visits_14d": 0}
+    ordered = set(frame.loc[frame["type"] == "order", "session_id"])
+    carts = frame[(frame["type"] == "add_to_cart") & ~frame["session_id"].isin(ordered)]
+    unique = lambda s: list(dict.fromkeys(clean(x, 80) for x in s.dropna()))  # noqa: E731
+    return {
+        "recent_views": unique(frame.loc[frame["type"] == "view", "title"])[:5],
+        "recent_searches": unique(frame.loc[frame["type"] == "search", "query"])[:3],
+        "left_in_cart": unique(carts["title"])[:3],
+        "visits_14d": int((frame["type"] == "session_start").sum()),
+    }

@@ -89,6 +89,11 @@ cd frontend && npm install && npm run dev           # dashboard on http://localh
   Claude may choose from. Offer choice is **Option A** (user's decision): pooled uplift model for *who*, measured
   campaign effects for *which* (`rules/effects.py`); per-person models only where they beat random on held-out
   data. New rules need a unit test in `tests/test_rules.py` and an invariant in `tests/test_property.py`.
+- Agent: `app/agent/pipeline.decide()` is the only entry point for AI decisions. Claude sees only `engine.menu()`;
+  every proposal goes through `engine.validate()` (with its message) before acceptance and once more before
+  return. Sonnet 5.5 at effort `low`, strict tools, `tool_choice` auto (forced tool use 400s), `fallbacks: "default"`
+  on Sonnet only. Customer text/names go through `agent/guard.py` and inside `<customer_data>` tags. Unit tests use
+  `tests/agent_fakes.FakeLLM`, never the real API; live checks are `scripts/decide.py --ai`.
 - Models: `scripts/train_models.py` → `customer_scores` + `model_runs` tables and `calibration/model_report.json`.
   Features are point-in-time (`build_features(tables, as_of)` only sees rows before `as_of`). Uplift is learned
   from the platform's past randomised campaigns (`campaign_assignments`), never from hidden traits; the
@@ -137,7 +142,7 @@ The user runs a **main build session** and a **docs session** side by side. Cont
 - [x] 2  Features, churn, uplift (validated on Hillstrom), CLV, segments (`scripts/train_models.py`)
 - [x] 3  Policy schema, rules engine, message checks, property tests (`backend/app/rules/`)
 - [x] 3b Rules-only next-best-offer (T4), segment fallbacks (T5), templates — works with no AI (`scripts/decide.py`)
-- [ ] 4  Claude offer agent + harness (L0–L6) + T1–T3 + audit log + red-team tests
+- [x] 4  Claude offer agent + harness (L0–L4 built; L5 with the bot, L6 with Health) + T1–T3 + audit log + red-team tests (`backend/app/agent/`)
 - [ ] 4b Health: independent re-checker, canary customers, golden evals
 - [ ] 5  Full Telegram flow (quiz → digital twin → browse → offer card → feedback, holdout)
 - [ ] 6  React dashboard + API + SSE
