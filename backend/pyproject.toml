@@ -8,7 +8,7 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "pydantic>=2.8",
     "pydantic-settings>=2.4",
-    "python-telegram-bot>=21.6",
+    "python-telegram-bot[job-queue]>=21.6",
     "numpy>=2.5.4",
     "pandas>=3.0.6",
     "scipy>=1.18.1",
@@ -48,3 +48,4 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 [tool.ruff.lint.per-file-ignores]
 "app/rules/templates.py" = ["E501"]  # customer-facing message text reads better unwrapped
 "app/agent/prompts.py" = ["E501"]  # prompt text reads better unwrapped
+"app/bot/cards.py" = ["E501"]  # chat UI text reads better unwrapped

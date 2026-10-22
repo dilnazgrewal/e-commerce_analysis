@@ -94,6 +94,10 @@ cd frontend && npm install && npm run dev           # dashboard on http://localh
   return. Sonnet 5.5 at effort `low`, strict tools, `tool_choice` auto (forced tool use 400s), `fallbacks: "default"`
   on Sonnet only. Customer text/names go through `agent/guard.py` and inside `<customer_data>` tags. Unit tests use
   `tests/agent_fakes.FakeLLM`, never the real API; live checks are `scripts/decide.py --ai`.
+- Bot: handlers never touch the DB or Claude on the event loop; they call `app/bot/store` /
+  `service.offer_for` via `asyncio.to_thread`. Every offer goes through `service.offer_for` → `store.persist` (L5
+  send-time re-check + exactly-once by idempotency key). Bot tables use `NaiveDatetime` (naive IST). Only ONE
+  polling bot process per token.
 - Models: `scripts/train_models.py` → `customer_scores` + `model_runs` tables and `calibration/model_report.json`.
   Features are point-in-time (`build_features(tables, as_of)` only sees rows before `as_of`). Uplift is learned
   from the platform's past randomised campaigns (`campaign_assignments`), never from hidden traits; the
@@ -144,7 +148,7 @@ The user runs a **main build session** and a **docs session** side by side. Cont
 - [x] 3b Rules-only next-best-offer (T4), segment fallbacks (T5), templates — works with no AI (`scripts/decide.py`)
 - [x] 4  Claude offer agent + harness (L0–L4 built; L5 with the bot, L6 with Health) + T1–T3 + audit log + red-team tests (`backend/app/agent/`)
 - [ ] 4b Health: independent re-checker, canary customers, golden evals
-- [ ] 5  Full Telegram flow (quiz → digital twin → browse → offer card → feedback, holdout)
+- [x] 5  Full Telegram flow (quiz → digital twin → browse → offer card → feedback, holdout) (`backend/app/bot/`)
 - [ ] 6  React dashboard + API + SSE
 - [ ] 7  NL rule editing + dry run, campaigns, policy simulation, AI analyst, two-way bot chat
 - [ ] 8  Deploy (container host + Neon + Vercel), classmate test round, README, demo script

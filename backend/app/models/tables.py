@@ -2,6 +2,7 @@
 
 from datetime import date, datetime
 
+from pydantic import NaiveDatetime
 from sqlmodel import Field, SQLModel
 
 
@@ -132,6 +133,37 @@ class OfferDecision(SQLModel, table=True):
     rule_checks: str  # JSON list of {rule, passed, reason}
     explanation: str  # JSON: why this offer (or none), shown in the dashboard and "Why me?"
     ai: str | None = None  # JSON: model, attempts, reasons (step 4)
+    channel: str | None = None  # telegram | cli | api
+    idempotency_key: str | None = Field(default=None, index=True)  # one send per (chat, trigger) — layer L5
+
+
+class BotUser(SQLModel, table=True):
+    """A real person on Telegram, playing a synthetic 'digital twin' customer. Only a first name is stored."""
+
+    __tablename__ = "bot_users"
+
+    chat_id: int = Field(primary_key=True)
+    first_name: str
+    language: str = "en"
+    quiz: str = "{}"  # JSON answers
+    twin_customer_id: str | None = Field(default=None, index=True)
+    holdout: bool = False  # live control group: never gets offers, measures true lift
+    opted_out: bool = False
+    consent_at: NaiveDatetime | None = None  # naive IST, like every other table
+    created_at: NaiveDatetime
+
+
+class Feedback(SQLModel, table=True):
+    """Button taps and replies on offer cards: the real outcomes from classmates."""
+
+    __tablename__ = "feedback"
+
+    id: int | None = Field(default=None, primary_key=True)
+    decision_id: str = Field(index=True)
+    chat_id: int = Field(index=True)
+    action: str  # claimed | dismissed | why | reason
+    detail: str | None = None
+    created_at: NaiveDatetime
 
 
 class SimHiddenTrait(SQLModel, table=True):

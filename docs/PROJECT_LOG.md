@@ -8,7 +8,7 @@
 > feature, dataset, decision or fix lands (rule in [CLAUDE.md](../CLAUDE.md), section "Documentation").
 > Each entry in the [timeline](#9-timeline) says which session did it.
 >
-> Last updated: **Thu 22 Oct 2026, ~21:40 IST**: step 4 entries checked against the code (docs session).
+> Last updated: **Thu 22 Oct 2026, ~22:00 IST**, after step 5 (full Telegram flow) was committed (main build session).
 > Step 4 facts were added at 21:29 by the main build session.
 
 Sessions referred to below:
@@ -145,6 +145,12 @@ CLV, so the profit maths reflects long-term value.
 | **Per-call timeout 20 s** instead of the planned 8 s | Claude (step 4), from a measurement | ~20:45 | A trivial live Sonnet 5.5 tool call took 8.2 s, so 8 s would have cut off normal calls; offers are pushed asynchronously, so a few seconds don't matter to the customer |
 | Agent runs on **Sonnet 5.5 at effort `low`**, T3 on **Haiku 5.5**; **strict tools with `tool_choice: auto`** (forced tool use is a 400 on Sonnet 5.5); **server-side refusal fallback** (`fallbacks: "default"`) on Sonnet calls | Claude (step 4), per the approved plan's model table and Anthropic's current API guidance | ~20:45 | Low effort keeps latency down for a short structured task; the refusal fallback is Anthropic's recommended default (Haiku 5.5 has none, so it isn't sent there) |
 | The customer's message and name reach Claude only inside `<customer_data>` tags, cleaned, with injection flags noted | Claude (step 4) | ~20:50 | The plan's L0 layer; the real defence is still that every proposal must pass the rules |
+| Bot quiz has **5 taps**: language is asked first, then the plan's 4 (where you live, what you shop for, how often, budget) | Claude (step 5) | ~21:40 | Every offer message must be in the customer's language, so it's needed before the first offer |
+| A classmate **becomes** their twin: the synthetic customer's record is linked to the chat, and its history, scores and points are theirs; only the first name and chosen language are overridden | Claude (step 5), from the plan's "their twin's 12-month history becomes theirs" | ~21:40 | Their first offer is decided from realistic behaviour, not an empty account |
+| Live **holdout by chat** (10%, stable hash of the chat ID); twins are never taken from the rules' own holdout | Claude (step 5) | ~21:40 | Two separate control groups would make some classmates silent forever; this keeps exactly one random 10% group for real people |
+| Twin matching **prefers offer-responsive twins** (persuadable, positive uplift) among similar matches, and Punjab twins for Punjabi speakers | Claude (step 5), after a smoke test | ~21:48 | The first smoke-test twin was a "sure thing" with negative uplift, so the rules correctly never sent it anything. This biases *who* bot users are, not the live experiment (holdout is still random) |
+| **Claim = a simulated order** (with the coupon), written to the platform tables | Claude (step 5) | ~21:40 | Claims then count as real outcomes in the same data the models train on |
+| **Quiet hours queue** offers until 09:00 IST instead of dropping them; an abandoned cart triggers a decision **90 s** after "Add to cart" | Claude (step 5) | ~21:40 | Respects the rule without losing the offer; 90 s is short enough to demo, long enough to look like an abandoned cart |
 
 The full approved plan is kept outside the repo at
 `C:\Users\HP\.claude\plans\d-desktop-hackathon-2-brief-pdf-https-g-abstract-pillow.md`. Its sections A–G and 1–12 are
@@ -745,9 +751,94 @@ or cheap offer worked.
 - The L5 send-time re-check inside a DB transaction and the L6 independent re-checker + canaries come with the bot
   (step 5) and the Health page (step 4b).
 
+### Step 5: full Telegram flow (main build session, 21:35–22:00 IST)
+
+**Why this step exists.** The brief: offers must "reach classmates through the bot". Classmates now play customers
+end to end: quiz → digital twin → browsing → an offer chosen by Claude and checked by the rules → Claim / Not for me
+/ Why me?, with every decision and tap logged.
+
+**Files** (all in [backend/app/bot/](../backend/app/bot/)):
+
+| File | What it does |
+|---|---|
+| [telegram_bot.py](../backend/app/bot/telegram_bot.py) | All handlers: /start, consent, quiz, /browse, cart, offer cards and buttons, /offer, /history, /stop, /resume, /help; jobs for the abandoned cart and the quiet-hours queue; the Telegram command menu |
+| [twin.py](../backend/app/bot/twin.py) | Quiz → most similar synthetic customer (tier +3, top category +3, any top-3 category +1, order frequency +2, usual spend +2, persuadable +2, positive uplift +1, sleeping dog −3, Punjab twin for Punjabi +1, rules-holdout −100); live holdout by chat |
+| [store.py](../backend/app/bot/store.py) | Bot users, live events, products, claims, feedback, history, and **layer L5**: the send-time re-check and exactly-once logging |
+| [service.py](../backend/app/bot/service.py) | One call: twin context (with the classmate's first name and language) → duplicate check → AI pipeline → L5 → log |
+| [cards.py](../backend/app/bot/cards.py) | Quiz questions, twin card, product cards, offer card, "Why me?" text, history |
+
+New tables: `bot_users` (chat ID, first name, language, quiz answers, twin, holdout, opt-out, consent time) and
+`feedback` (decision, action, detail, time). `offer_decisions` gained `channel` and `idempotency_key`. They were
+added to the existing database without losing data (`store.ensure_schema`).
+
+**A classmate's journey:**
+1. **/start** → welcome, privacy note (simulated; only the first name and taps are stored) → "✅ Let's go" (consent).
+2. **5-tap quiz:** language (English / Hinglish / ਪੰਜਾਬੀ), where you live, what you shop for, how often, budget.
+3. **Twin card:** "You shop like Saumya from Kochi: Tier-2 city, loves health & household + home & kitchen, 16 orders
+   in the past year (usually ₹1,100), 251 reward points, last order 20 days ago." The twin's record is linked to
+   the chat.
+4. **First offer**, trigger `welcome`. Decided by the AI pipeline (step 4), checked by the rules, then by L5.
+5. **/browse:** 3 real catalogue products per page (photo, ₹ price, struck-out MRP, rating) for the chosen
+   category, within budget. Each shown product is logged as a `view` event; "❤️ Add to cart" logs `add_to_cart`.
+6. **Abandoned cart:** 90 s later, if the item is still not ordered, trigger `cart_abandoned`. Claude sees the cart
+   item through `get_recent_activity`, and the offer card uses the cart item's photo.
+7. **Offer card buttons:**
+   - **🛒 Claim:** a simulated order with the coupon, written to `orders`, `order_items` and `events`; status `claimed`.
+   - **🙅 Not for me:** status `dismissed`, plus an optional reason (too expensive / not interested / already
+     bought / too many offers).
+   - **❓ Why me?:** the reason, the expected uplift in plain words, who chose it (Claude or the rules) and how many
+     rule checks passed.
+8. **/offer** asks for an offer now (trigger `requested`). **/history** lists recent offers and their status.
+   **/stop** opts out: the twin's `opted_out` is set, so the rules block every offer. **/resume** reverses it.
+9. **Quiet hours** (21:00–09:00 IST): the decision is logged as `queued`, the classmate is told when it will
+   arrive, and a job re-decides at 09:00.
+10. **Live holdout:** 10% of chats get a logged `holdout` decision and never an offer (no Claude call). Comparing
+    their claim and order rates with everyone else's measures real lift.
+
+**Layer L5, send-time re-check** (`store.persist`): inside one database transaction, with a lock in the bot process.
+- An idempotency key stops the same trigger being handled twice. It is checked **before** deciding, so a repeat
+  costs no Claude call.
+- Opt-out, the 7-day frequency cap, no stacking and the daily budget are re-checked against what is logged at that
+  moment. A `sent` decision that fails is downgraded to `suppressed` ("Stopped at send time: …") and nothing is
+  sent.
+- The 4 `send_time_*` checks are added to the decision's rule checks. A sent offer typically shows 31 of 31 passed.
+
+**End-to-end smoke test** (on a copy of the database, real Claude, decision time 23 Oct 11:00 IST):
+- A Punjabi-speaking tester ("Dilnaz") was matched to Saumya from Kochi. An abandoned beauty item → **T1, sent**,
+  after 3 Sonnet calls (4.3 s, 3.9 s, 3.7 s).
+- Claude wrote, in Gurmukhi and including the name: "ਦਿਲਨਾਜ਼, ਤੁਹਾਡੀ ਕਾਰਟ ਵਿੱਚ ਸਾਮਾਨ ਉਡੀਕ ਰਿਹਾ ਹੈ! 30 Oct ਤੱਕ ਕੋਡ
+  OIQ-POINTS-MRYBV ਵਰਤੋ ਅਤੇ 2 ਗੁਣਾ ਰਿਵਾਰਡ ਪੁਆਇੰਟ ਪਾਓ। 🎁"
+- 31 of 31 checks passed. "Why me?" read clearly. The claim wrote a simulated order (₹289 hair brush). Repeating
+  the same trigger returned `duplicate` with no Claude call.
+
+**Tests** (14 new or updated, on a temporary database and with fake Telegram updates):
+- **Twin matching:** follows the quiz answers, never picks a rules-holdout customer, and a taken twin isn't offered
+  again.
+- **Holdout:** live holdout is ~10% and logged without any Claude call.
+- **L5:** an offer is logged once; a duplicate trigger is skipped; a second trigger doesn't stack. A stale `sent`
+  decision is downgraded at send time.
+- **Claims:** a claim writes an order and events.
+- **Opt-out** reaches the rules.
+- **Browsing:** pages don't repeat, and the cart is tracked until an order.
+- **Telegram limits:** all button data ≤ 64 bytes, the offer caption ≤ 1,024 characters, and "Why me?" text is
+  generated.
+- **Quiet hours:** the end is computed correctly. Handlers: /start registers the user, and every command and
+  button pattern is registered.
+
+**Limits and honest notes:**
+- **Tonight's tests will be queued.** The bot went live at 21:51 IST, inside quiet hours, so offers asked for now
+  arrive after 09:00.
+- **Scores don't refresh live.** A classmate's twin scores come from the last training run; new taps change what
+  Claude sees (recent activity) but not the churn or uplift scores until a retrain.
+- **Text replies aren't understood yet.** Free text gets a "use the buttons" reply; two-way chat is step 7.
+- **One bot process.** The L5 lock is per process, which is fine for one polling bot. The cloud deployment
+  (step 8) also runs a single process.
+- **Some products are odd.** The catalogue is from US Amazon, so a few products shown are unusual for India.
+- **Twin-matching bias.** Among similar twins, the matching prefers ones that respond to offers (see §2).
+
 ### Quality and safety so far
 
-- **203 tests pass** (after the step 4 commit; ~3.5 min), and ruff lint is clean. The tests cover:
+- **213 tests pass** (after the step 5 commit; ~1.5–3.5 min), and ruff lint is clean. The tests cover:
   - bot handlers
   - the health endpoint
   - BG/NBD parameter recovery
@@ -766,6 +857,7 @@ or cheap offer worked.
   - **messages:** each of 12 message rules; Punjabi/Hinglish script detection; coupon codes never count as numbers; every template × language (30 cases) passes the checks
   - **agent guardrails (step 4):** 20 scripted fake-Claude tests (see Step 4)
   - **red team (step 4):** 40 attacks + 10 benign messages; detection rate; 80 containment cases with an obedient fake Claude
+  - **Telegram flow (step 5):** twin matching, live holdout, L5 send-time re-check and duplicates, claims, opt-out, browsing and cart, Telegram size limits, handlers
   - **property tests (Hypothesis):** 10,000 random or near-valid proposals and 2,000 full decisions. An independently written checker confirms that nothing approved breaks a rule, and every number in every sent message is a fact of the offer (~380 approved boundary cases and ~600 sent decisions per run)
 - **Secrets:**
   - `.env` is git-ignored, and keys are checked by format and length, never printed
@@ -976,6 +1068,10 @@ cd ../frontend && npm install && npm run dev                # dashboard → http
 | 21:0x | Retry tests looked at the wrong message: the fake Claude kept a reference to the pipeline's message list, which kept growing | The fake keeps a snapshot of the messages for each request |
 | 21:0x | The guard missed `ig\u200bnore previous instructions` (zero-width space inside the keyword) and extra spaces | The guard deletes invisible characters and collapses whitespace before matching; patterns use `\s+` |
 | 20:5x–21:1x | Scripted shell edits broke Python string escapes three times (prompt lines, the guard function, a log table row) | Fixed by direct file edits; later patches were written as script files instead of inline shell text |
+| 21:4x | SQLModel 0.0.48 rejects naive datetimes in ORM inserts, but the project stores naive IST times | The two new bot tables use Pydantic `NaiveDatetime` |
+| 21:4x | A repeated trigger still called Claude before being recognised as a duplicate | The idempotency key is checked before deciding; L5 still checks it again inside the transaction |
+| 21:48 | Smoke test: the first twin was a "sure thing" with negative uplift, so the rules correctly sent nothing, but a classmate matched like that would never see an offer | Twin matching prefers offer-responsive twins among similar matches (§2) |
+| 21:4x | Test bot user set to Punjabi while the fake Claude writes English; the language check (correctly) rejected the messages | Test user set to English |
 
 ## 9. Timeline
 
@@ -1050,6 +1146,10 @@ All times IST, Thu 22 Oct 2026.
 
   Updated the parts that step 4 made stale: the timeout in §6, which guardrail layers and tiers are built, the
   build schedule, and the test run time.
+- **~21:35, main:** the user asks to start step 5.
+- **21:35–21:50, main:** bot tables and store (L5), twin matching, service, cards, all handlers and jobs; 14 bot tests. A smoke test on a database copy with real Claude found the "sure thing" twin problem; matching fixed.
+- **21:51, main:** the old step 0 bot process stopped; the new bot started (polling) and the real database migrated (new tables and columns, no data lost). 213 tests pass.
+- **~22:00, main:** step 5 committed.
 
 ## 10. Open items and the user's to-dos
 
@@ -1057,7 +1157,7 @@ All times IST, Thu 22 Oct 2026.
 - [ ] Stop the duplicate API and bot processes; run one bot only.
 - [ ] Optional: improve the bot in @BotFather with `/setname` (e.g. "OfferIQ: Smart Offers"), `/setdescription`
       and `/setuserpic`.
-- [ ] Share https://t.me/Dilnazecom_bot with classmates, and recruit 3–5 testers by step 5.
+- [ ] Share https://t.me/Dilnazecom_bot with classmates, and recruit 3–5 testers (step 5 is live). Offers asked for between 21:00 and 09:00 IST are queued until 09:00; the bot only runs while the laptop and its process are on.
 - [ ] Delete `backend/offeriq.db.stale` (378 MB leftover) when convenient.
 - [ ] Step 8: free container host, Neon and Vercel accounts; choose a dashboard password. `WEBHOOK_URL` gets the
       deployed backend's public address then (e.g. `…/api/telegram/webhook`), and `TELEGRAM_WEBHOOK_SECRET` is
@@ -1087,6 +1187,7 @@ All times IST, Thu 22 Oct 2026.
 | Claude offer agent | Sonnet 5.5 with 3 strict tools picks from the rules' menu; T2 retry with rule reasons; Haiku 5.5 T3; then rules-only |
 | Live AI decisions (20 customers) | 9 accepted first time, 1 fixed on retry, 0 failed calls; median 3.0 s per call; ~US $0.01 per decision; messages in EN / Hinglish / Punjabi |
 | Prompt-injection defence | Guard flags 37/40 attacks (0/10 false alarms); with a Claude that obeys every attack, 80/80 still sent nothing that breaks a rule |
-| Tests | 203 passing; lint clean |
+| Telegram flow | 5-tap quiz → digital twin from 5,000 customers → browse real products → abandoned-cart offer by Claude, checked by the rules and re-checked at send time → Claim / Not for me / Why me?; 10% live holdout by chat |
+| Tests | 213 passing; lint clean |
 | Bot | @Dilnazecom_bot, live in polling mode |
 | Safety design | 7 guardrail layers, 6-tier fallback (3 tiers without AI), models blocked from ground truth |

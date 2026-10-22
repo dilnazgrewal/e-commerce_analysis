@@ -1,7 +1,9 @@
 from app.models.tables import (
+    BotUser,
     CampaignAssignment,
     Customer,
     Event,
+    Feedback,
     OfferDecision,
     Order,
     OrderItem,
@@ -10,9 +12,11 @@ from app.models.tables import (
 )
 
 __all__ = [
+    "BotUser",
     "CampaignAssignment",
     "Customer",
     "Event",
+    "Feedback",
     "OfferDecision",
     "Order",
     "OrderItem",

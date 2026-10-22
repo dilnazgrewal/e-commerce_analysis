@@ -167,6 +167,29 @@ Tests:
 - A red-team suite of 40 attacks (EN/Hinglish/Punjabi): the guard flags 92% with no false alarms.
 - With a fake Claude that obeys every attack, **80 of 80** decisions still sent nothing that breaks a rule.
 
+## Telegram bot: classmates play customers
+
+**[@Dilnazecom_bot](https://t.me/Dilnazecom_bot)**:
+1. `/start` → consent → a **5-tap quiz** (language, where you live, what you shop for, how often, budget).
+2. You're matched to your **digital twin**, the most similar of the 5,000 synthetic customers, and their 12-month
+   history becomes yours.
+3. **First offer:** chosen by Claude, checked by the rules, re-checked at send time.
+4. `/browse` shows real catalogue products. Leave something in the cart and an abandoned-cart offer arrives 90 s
+   later.
+5. Every offer card has **🛒 Claim** (a simulated order with the coupon), **🙅 Not for me** (with an optional
+   reason) and **❓ Why me?** (the reason, the expected effect, who chose it, and how many rule checks passed).
+
+Also:
+- `/offer`, `/history`, `/stop` (the rules then block every offer) and `/resume`.
+- Offers requested during quiet hours (21:00–09:00 IST) are queued until 09:00.
+- 10% of chats are a random **live holdout** that never gets offers, so the real effect of offers can be measured.
+- Every decision is logged with its checks, whether or not anything was sent.
+
+```bash
+cd backend
+uv run python -m app.bot.telegram_bot     # polling mode; run only ONE copy per bot token
+```
+
 ## Project guide
 
 See [CLAUDE.md](CLAUDE.md) for architecture, rules, conventions, and build progress.
