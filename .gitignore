@@ -6,8 +6,14 @@
 # Raw real-world datasets (large; used only for calibration)
 data/raw/*
 !data/raw/.gitkeep
+
+# Local databases (rebuilt by scripts/seed_db.py), SQLite side files and moved-aside copies
 *.db
 *.sqlite
+*.db-journal
+*.db-wal
+*.db-shm
+*.db.stale
 
 # Python
 __pycache__/
