@@ -9,6 +9,12 @@ Per customer per day:
 Each session emits session_start → [search] → views → [add_to_cart] → [checkout_start → order].
 Carts in non-buying sessions are abandoned; the add-to-cart rate is derived so that the overall
 cart-abandonment rate matches the configured target.
+
+Offers: `apply_offer` multiplies a customer's purchase and browse rates by (1 + effect) while the offer is
+valid. The effect is the simulator's ground truth (`offer_effect`): it scales the customer's hidden,
+Hillstrom-calibrated responsiveness by how attractive that offer type is to someone with their price
+sensitivity. Sleeping dogs (negative responsiveness) buy *less* when contacted. Monetary offers are
+redeemed on the next order, so their discount cost is real.
 """
 
 from collections import defaultdict
@@ -47,6 +53,17 @@ ORDER_COLUMNS = [
     "points_redeemed",
 ]
 ITEM_COLUMNS = ["order_id", "product_id", "category", "qty", "price_inr"]
+ASSIGNMENT_COLUMNS = [
+    "campaign_id",
+    "customer_id",
+    "arm",
+    "offer_type",
+    "offer_value",
+    "sent_at",
+    "valid_until",
+]
+SHIPPING_FEE_INR = 40
+FREE_SHIPPING_THRESHOLD_INR = 499
 RETURN_REASONS = [
     "size/fit issue",
     "not as described",
@@ -69,6 +86,7 @@ class SimState:
     events: list = field(default_factory=list)
     orders: list = field(default_factory=list)
     items: list = field(default_factory=list)
+    assignments: list = field(default_factory=list)
 
     def __post_init__(self) -> None:
         c = self.population.customers
@@ -82,6 +100,11 @@ class SimState:
         self.lam = t["purchase_rate_per_day"].to_numpy()
         self.p_drop = t["dropout_prob_per_order"].to_numpy()
         self.price_sens = t["price_sensitivity"].to_numpy()
+        self.responsiveness = t["offer_responsiveness"].to_numpy()
+        n = len(self.ids)
+        self.offer_boost = np.zeros(n)
+        self.offer_until = np.full(n, -1)
+        self.offer_spec: list[dict | None] = [None] * n
         self.cum_affinity = np.cumsum(self.population.affinity, axis=1)
 
         funnel = self.india["funnel"]
@@ -107,6 +130,7 @@ class SimState:
         self.cum_hours = np.cumsum(hours) / hours.sum()
         self.weekday = self.india["weekday_weights"]
         self.browse_per_day = funnel["browse_only_sessions_per_month"] / 30
+        self.opted_out = c["opted_out"].to_numpy()
 
     def next_id(self, prefix: str) -> str:
         self.counters[prefix] += 1
@@ -123,6 +147,70 @@ def new_state(population: Population, catalogue: pd.DataFrame, india: dict, seed
         alive=traits["alive"].to_numpy().copy(),
         points=population.customers["points_balance"].to_numpy().copy(),
     )
+
+
+def offer_effect(offer_type: str, value: float, price_sens: float, responsiveness: float) -> float:
+    """Ground-truth relative change in purchase rate while an offer is live (simulator only)."""
+    if responsiveness < 0:
+        return float(responsiveness)  # sleeping dog: any contact backfires
+    ps = price_sens
+    depth = max(value, 1) / 10  # discount depth relative to a 10% offer
+    strength = {
+        "CART_NUDGE": 0.5,
+        "POINTS_EXPIRY": 0.55,
+        "EARLY_ACCESS": 0.4 + 0.3 * (1 - ps),
+        "BONUS_POINTS": 0.5 + 0.3 * (1 - ps),
+        "FREE_SHIPPING": 0.6 + 0.6 * ps,
+        "UPI_CASHBACK": 0.5 + 0.7 * ps,
+        "PCT_OFF": (0.4 + 1.4 * ps) * depth**0.7,
+        "FLAT_OFF": (0.4 + 1.4 * ps) * (max(value, 1) / 90) ** 0.7,  # Rs 90 ~ 10% of a typical order
+        "WIN_BACK": (0.5 + 1.4 * ps) * depth**0.7,
+    }.get(offer_type, 0.5)
+    return float(responsiveness * strength)
+
+
+def apply_offer(
+    state: SimState,
+    customer_idx: int,
+    offer_type: str,
+    value: float,
+    day: date,
+    valid_days: int,
+    code: str,
+) -> None:
+    effect = offer_effect(
+        offer_type, value, state.price_sens[customer_idx], state.responsiveness[customer_idx]
+    )
+    state.offer_boost[customer_idx] = effect
+    state.offer_until[customer_idx] = (day + timedelta(days=valid_days - 1)).toordinal()
+    state.offer_spec[customer_idx] = {"type": offer_type, "value": value, "code": code}
+    # A strong enough offer can win back a customer who had silently churned.
+    if not state.alive[customer_idx] and effect > 0 and state.rng.random() < min(0.25, 0.1 * effect):
+        state.alive[customer_idx] = True
+
+
+def run_campaign(
+    state: SimState,
+    campaign_id: str,
+    day: date,
+    arms: dict[str, tuple[str, float] | None],
+    weights: dict[str, float],
+    valid_days: int = 14,
+) -> None:
+    """Randomised campaign: every signed-up, opted-in customer is assigned to an arm (None = control)."""
+    eligible = np.flatnonzero((state.signup <= day) & ~state.opted_out)
+    names = list(arms)
+    probs = np.array([weights[a] for a in names], dtype=float)
+    picks = state.rng.choice(len(names), size=len(eligible), p=probs / probs.sum())
+    sent = datetime(day.year, day.month, day.day, 10, 0)
+    until = sent + timedelta(days=valid_days)
+    for i, pick in zip(eligible, picks, strict=True):
+        arm = names[pick]
+        spec = arms[arm]
+        if spec is not None:
+            apply_offer(state, i, spec[0], spec[1], day, valid_days, f"{campaign_id}-{arm}")
+        offer_type, value = spec if spec else (None, None)
+        state.assignments.append([campaign_id, state.ids[i], arm, offer_type, value, sent, until])
 
 
 def _product(state: SimState, i: int) -> tuple[int, np.ndarray]:
@@ -205,8 +293,12 @@ def _order(state: SimState, i: int, ts: datetime, sid: str, basket: list) -> Non
     gross = int(sum(int(p[1]) for _, p in basket))
     main_category = state.categories[basket[0][0]]
 
-    discount, coupon = 0, None
-    if rng.random() < 0.08 + 0.3 * state.price_sens[i]:
+    discount, coupon, bonus_mult = 0, None, 1
+    spec = state.offer_spec[i]
+    if spec is not None and state.offer_until[i] >= ts.date().toordinal():
+        discount, coupon, bonus_mult = _redeem(spec, gross, state.payment[i])
+        state.offer_spec[i], state.offer_boost[i], state.offer_until[i] = None, 0.0, -1
+    elif rng.random() < 0.08 + 0.3 * state.price_sens[i]:
         pct = min(rng.uniform(0.05, 0.15), state.margin[main_category] / 100 * 0.6)
         discount = int(round(gross * pct))
         coupon = f"SAVE{int(round(pct * 100))}"
@@ -229,7 +321,7 @@ def _order(state: SimState, i: int, ts: datetime, sid: str, basket: list) -> Non
 
     net = gross - discount - redeemed
     earned = (
-        (net // 100) * state.india["points"]["earn_per_100_inr"] * (2 if state.prime[i] else 1)
+        (net // 100) * state.india["points"]["earn_per_100_inr"] * (2 if state.prime[i] else 1) * bonus_mult
         if status == "delivered"
         else 0
     )
@@ -254,6 +346,22 @@ def _order(state: SimState, i: int, ts: datetime, sid: str, basket: list) -> Non
         state.pending[ts.date() + timedelta(days=2)].append((i, "points_earned", order_id, earned))
 
 
+def _redeem(spec: dict, gross: int, payment: str) -> tuple[int, str | None, int]:
+    """Discount (Rs), coupon code and points multiplier when an order uses a live campaign offer."""
+    kind, value, code = spec["type"], spec["value"], spec["code"]
+    if kind in ("PCT_OFF", "WIN_BACK"):
+        return int(round(gross * value / 100)), code, 1
+    if kind == "FLAT_OFF":
+        return (int(value), code, 1) if gross >= 2 * value else (0, None, 1)
+    if kind == "FREE_SHIPPING":
+        return (SHIPPING_FEE_INR, code, 1) if gross < FREE_SHIPPING_THRESHOLD_INR else (0, code, 1)
+    if kind == "UPI_CASHBACK":
+        return (int(min(value, gross * 0.1)), code, 1) if payment != "COD" else (0, None, 1)
+    if kind == "BONUS_POINTS":
+        return 0, code, int(value)
+    return 0, None, 1
+
+
 def step_day(state: SimState, day: date) -> None:
     """Simulate one calendar day for the whole population (appends to state.events/orders/items)."""
     rng = state.rng
@@ -265,7 +373,9 @@ def step_day(state: SimState, day: date) -> None:
 
     active = state.signup <= day
     season = festive_multiplier(day, state.india) * state.weekday[day.weekday()]
-    rate = np.where(active & state.alive, state.lam * season, 0.0)
+    live = state.offer_until >= day.toordinal()
+    offer_mult = np.where(live, np.maximum(1 + state.offer_boost, 0.05), 1.0)
+    rate = np.where(active & state.alive, state.lam * season * offer_mult, 0.0)
     n_orders = rng.poisson(rate)
     n_browse = rng.poisson(rate * (state.spo - 1))
     churned = active & ~state.alive
@@ -280,6 +390,10 @@ def step_day(state: SimState, day: date) -> None:
             _session(state, i, day, buys=True)
             if rng.random() < state.p_drop[i]:
                 state.alive[i] = False
+
+
+def assignments_frame(state: SimState) -> pd.DataFrame:
+    return pd.DataFrame(state.assignments, columns=ASSIGNMENT_COLUMNS)
 
 
 def simulate(state: SimState, start: date, end: date) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:

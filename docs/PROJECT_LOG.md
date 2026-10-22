@@ -8,7 +8,7 @@
 > feature, dataset, decision or fix lands (rule in [CLAUDE.md](../CLAUDE.md), section "Documentation").
 > Each entry in the [timeline](#9-timeline) says which session did it.
 >
-> Last updated: **Thu 22 Oct 2026, ~17:35 IST**, after step 1 was committed and while step 2 is in progress.
+> Last updated: **Thu 22 Oct 2026, ~19:55 IST**, after step 2 was committed (main build session).
 
 Sessions referred to below:
 - **Main build session**: the planning-and-build chat ("E-commerce analysis system"). It wrote the plan, step 0
@@ -269,7 +269,7 @@ mean, because the mean was deliberately rescaled for India.
 **8 of 8 pass.** The test suite runs the same checks on a 1,500-customer world and fails if any check drifts past
 its limit.
 
-The re-seed with past campaigns (step 2, in progress) still passes 8/8: 1,988,644 events, 25,758 orders.
+The re-seed with three past campaigns (step 2) still passes 8/8: 2,001,305 events, 26,110 orders, 12,469 campaign assignments.
 
 ### 4.8 Known limitations (be honest about these in the submission)
 
@@ -316,41 +316,121 @@ Everything in [§4](#4-data-sources-procedure-and-what-each-one-gives-us):
 - realism report (8/8)
 - tests
 
-### Step 2: features, churn, uplift, CLV, segments (in progress, main build session, started 17:18 IST)
+### Step 2: features, churn, uplift, CLV, segments (main build session, 17:18–19:55 IST)
 
-What is on disk so far, not yet committed:
+**Why this step exists.** A discount only pays when it *changes* what a customer does. Step 2 scores every customer
+on: how likely they are to stop buying (churn), how much an offer would *cause* them to buy (uplift), and what they
+are worth (CLV). It then gives each customer a label a marketer understands (segments). Step 3 will combine these
+into expected extra profit per offer.
 
-**Offer mechanics in the simulator:**
-- `offer_effect` is the hidden "true" effect of each offer type on a customer.
-  - It scales their Hillstrom-calibrated responsiveness by how attractive the offer is for their price
-    sensitivity: for example, % off matters more to price-sensitive people, and bonus points to less sensitive
-    ones.
-  - Sleeping dogs buy *less* when contacted.
-  - A strong offer can occasionally win back a churned customer.
-- Monetary offers are redeemed on the next order, so their discount cost is real.
+**Offer mechanics in the simulator** ([simulator.py](../backend/app/data/simulator.py)):
+- `offer_effect` is the hidden "true" effect of an offer on a customer. It scales the customer's
+  Hillstrom-calibrated responsiveness by how attractive that offer type is at their price sensitivity
+  (% off matters more to price-sensitive people, bonus points to less sensitive ones).
+- Sleeping dogs (~6%) buy *less* when contacted. A strong offer can occasionally win back a churned customer.
+- Monetary offers are redeemed on the next order (coupon code `CMP-…`), so their discount cost is real.
 
-**Two past randomised campaigns** in the history ([history.py](../backend/app/data/history.py)):
-- `CMP-MAY` ran 150 days before "today"; `CMP-AUG` ran 75 days before.
-- Each randomly split all opted-in customers into: 35% control, and 13% each to cart nudge, 2× points,
-  free shipping, 10% off and ₹100 off.
-- Offers were valid for 14 days.
-- Stored in `campaign_assignments`.
-- **The uplift models learn only from these A/B results**, just as a real platform would, never from hidden traits.
+**Three past randomised campaigns** ([history.py](../backend/app/data/history.py), table `campaign_assignments`):
+- `CMP-MAR` (225 days before "today"), `CMP-MAY` (150 days), `CMP-AUG` (75 days); 12,469 assignments in total.
+- Each randomly splits all opted-in customers: 35% control; 13% each to cart nudge, 2× points, free shipping,
+  10% off, ₹100 off. Offers are valid for 14 days.
+- **The uplift models learn only from these A/B results**, never from hidden traits. A third campaign was added
+  during the step because two did not give enough data per offer type.
 
-**Feature pipeline** ([features.py](../backend/app/analytics/features.py)):
-- every feature is computed "as of" a date, from platform tables only, so there is no leakage from the future
-- `gender` is never loaded
+**Feature pipeline** ([features.py](../backend/app/analytics/features.py)): 54 columns per customer, each computed
+"as of" a date from platform tables only, so no future data leaks into training. Covers recency/frequency/spend,
+returns, RTO, COD share, coupon and points dependence, festive share, visits, views, searches, cart abandonment,
+open cart value, points expiring, category spend mix, margin mix, and past campaign exposure. `gender` is never loaded.
 
-**Churn model** ([churn.py](../backend/app/analytics/churn.py)):
-- HistGradientBoosting predicting P(no order in the next 60 days)
-- trained on a snapshot taken 60 days ago
-- comes with plain-English reason codes (e.g. "No order in 74 days")
+**Models** (all trained on the synthetic platform's own data, by `scripts/train_models.py`, ~5–6 min):
 
-Still to come: uplift (validated on Hillstrom), CLV, segments.
+| Model | Method | Code |
+|---|---|---|
+| Churn: P(no order in next 60 days) | HistGradientBoosting on a snapshot 60 days ago; plain-English reason codes | [churn.py](../backend/app/analytics/churn.py) |
+| Uplift: extra 14-day purchase chance caused by each offer type | T-learner per arm, blended with a pooled "any offer" model; small, heavily regularised trees | [uplift.py](../backend/app/analytics/uplift.py) |
+| CLV (90-day) | BG/NBD refitted on the platform's orders → P(alive) and expected orders; × shrunk order value × category margin | [clv.py](../backend/app/analytics/clv.py) |
+| Segments | Uplift groups (relative thresholds) + lifecycle rules | [segments.py](../backend/app/analytics/segments.py) |
+
+Output: table `customer_scores` (one row per customer), table `model_runs` (full report per run), and
+[calibration/model_report.json](../calibration/model_report.json).
+
+#### How the models were tested
+
+1. **Held-out customers**: churn trained on 75% of customers and scored on the other 25% (1,159); uplift trained
+   on 70% of customers and scored on the other 30% (split by customer, so nobody is on both sides).
+2. **Real data**: the same uplift method run on the real Hillstrom RCT (64,000 customers), 70/30 split.
+3. **Answer key**: because customers are synthetic, predictions are compared with the hidden true behaviour. This
+   runs in `scripts/train_models.py`, outside `app/`, so no model can depend on it.
+4. **Code tests**: unit tests for the features (no future leakage), Qini maths, confidence intervals, P(alive),
+   segment rules and reason text.
+
+#### Results (run of 22 Oct, as-of date 2026-10-22)
+
+**Churn** (base rate 53%: about half of customers have no order in a given 60-day window)
+
+| Metric | Score | Meaning |
+|---|---|---|
+| AUC | **0.865** | Given one leaver and one stayer, the model ranks the leaver riskier 86.5% of the time (0.5 = guessing) |
+| Brier | **0.151** vs 0.249 for guessing | ~40% smaller error in the predicted probabilities |
+| Calibration | Good at the ends, off in the middle | Says 94% → 95% left; says 19% → 30% left; says 80% → 72% left |
+| Strongest signals | Visits in last 90 days (by far), days since last order, visits in last 30 days | |
+
+**Measured offer effects** (randomised, all three campaigns pooled; 14-day purchase rate, treated − control)
+
+| Arm | Effect | 95% CI | Treated / control |
+|---|---|---|---|
+| Cart nudge (no discount) | +3.8 pp | [+1.5, +6.1] | 1,606 / 4,354 |
+| 2× points | +5.6 pp | [+3.2, +7.9] | 1,613 / 4,354 |
+| Free shipping | +5.5 pp | [+3.2, +7.8] | 1,648 / 4,354 |
+| 10% off | +6.1 pp | [+3.8, +8.5] | 1,610 / 4,354 |
+| ₹100 off | +6.3 pp | [+4.0, +8.7] | 1,638 / 4,354 |
+
+**Uplift targeting on held-out customers** (×: uplift among the model's top 30% ÷ average uplift; above 1 beats random)
+
+| Deciding… | Top 30% | Average | × | Verdict |
+|---|---|---|---|---|
+| **Who gets any offer** (pooled model) | +9.0 pp | +5.3 pp | **1.69** | ✅ reliable |
+| Who gets 2× points | +16.9 pp | +6.2 pp | 2.71 | ✅ |
+| Who gets free shipping | +7.6 pp | +5.7 pp | 1.33 | ✅ |
+| Who gets a nudge | +3.6 pp | +3.5 pp | 1.06 | ⚠️ ≈ random |
+| Who gets ₹100 off | +4.2 pp | +6.0 pp | 0.69 | ❌ worse than random |
+| Who gets 10% off | +1.8 pp | +5.1 pp | 0.36 | ❌ worse than random |
+
+**Same method on the real Hillstrom RCT** (held-out 30%): visits ×**1.35** (+7.6 pp vs +5.6 pp average);
+purchases ×**1.24** (+0.40 pp vs +0.33 pp).
+
+**Against the answer key**
+
+| Check | Result | Meaning |
+|---|---|---|
+| Predicted vs true uplift (10% off), Spearman | 0.17 | Weak but positive: much of each person's response is individual variation no data reveals |
+| Churn score vs truly churned, Spearman | 0.37 | Clear positive link |
+| Sleeping dogs found | 2.5% found; flagged ones 6% correct | ❌ No better than chance with three campaigns |
+
+**CLV**: BG/NBD on the platform's orders gives r = 0.55, α = 14.8, a = 2.02, b = 286 (converged); population average
+order ₹2,444. Not yet backtested (does predicted 90-day value match what happened?), so planned.
+
+**Segments today**:
+- Uplift group: persuadable 2,000 · lost cause 2,659 · sure thing 229 · sleeping dog 112.
+- Thresholds: persuadable means top 40% by best-offer uplift and ≥ +8.7 pp; sure thing means the top 20% of
+  baseline buyers (≥ 40% chance in 14 days).
+- Lifecycle: lapsed 1,803 · active 1,655 · bargain hunter 405 · at risk 382 · new 324 · VIP 323 · window shopper 108.
+
+#### Weak spots and what they mean for step 3 (be honest about these in the submission)
+
+- **Which offer** is not reliable per person for 10% off, ₹100 off and nudges (about 1,600 customers per arm is too
+  little to learn separate patterns). The `best_offer_type` column should not be trusted yet.
+- **Proposed for step 3 (awaiting the user's decision):** use the model for *who* gets an offer, and the measured
+  campaign effects above for *which* offer, switching to a per-person model only for offer types that beat random
+  on held-out customers (currently 2× points and free shipping).
+- **Sleeping dogs cannot be singled out.** Protect them with frequency caps and holdout groups, not the label.
+- **Uplift is short-term** (14-day purchase), not long-term retention; step 3 combines it with churn and CLV.
+- Churn is miscalibrated in the middle range (19% predicted vs 30% observed).
+- CLV has no backtest yet. Training takes ~5–6 min, fine nightly but too slow to re-run during a live demo.
 
 ### Quality and safety so far
 
-- **17 tests pass** (after the step 1 commit), and ruff lint is clean. The tests cover:
+- **26 tests pass** (after the step 2 commit), and ruff lint is clean. The tests cover:
   - bot handlers
   - the health endpoint
   - BG/NBD parameter recovery
@@ -361,6 +441,10 @@ Still to come: uplift (validated on Hillstrom), CLV, segments.
   - a consistent event log
   - realism checks
   - hidden traits unreadable by models
+  - past campaigns are randomised and offers lift orders
+  - features never use future rows; open-cart and profile features
+  - Qini rewards a model that ranks true responders first; ATE confidence intervals
+  - uplift-group and lifecycle rules; P(alive) falls when a customer goes quiet; readable reason text
 - **Secrets:**
   - `.env` is git-ignored, and keys are checked by format and length, never printed
   - every commit's staged diff was scanned for `sk-ant-` and bot-token patterns before committing
@@ -459,6 +543,7 @@ cd backend
 uv sync                                                     # Python 3.12 env + deps
 uv run python ../scripts/bootstrap_data.py                  # sample real data → data/raw/ → calibration/ (~55 MB download)
 uv run python ../scripts/seed_db.py --customers 5000 --seed 42 --as-of 2026-10-22   # DB + realism report
+uv run python ../scripts/train_models.py                    # churn/uplift/CLV/segments → customer_scores (~6 min)
 uv run pytest                                               # tests
 uv run uvicorn app.main:app --reload                        # API → http://localhost:8000/docs
 uv run python -m app.bot.telegram_bot                       # bot (only ONE copy at a time)
@@ -477,6 +562,13 @@ cd ../frontend && npm install && npm run dev                # dashboard → http
 | 15:39 / 16:5x | The Windows console (cp1252) crashed printing "≤" and "→" | The scripts switch stdout to UTF-8 |
 | 16:55 | The generator test failed with `KeyError: 'customers'`: the test never loaded the table definitions | The test now imports `app.models` (docs session) |
 | 16:58 | The 1.94M-event DB load failed with "database is locked" on a 378 MB leftover DB from an earlier partial run | The old file was moved to `offeriq.db.stale` (not deleted) and a fresh one seeded. `*.db.stale` and SQLite side files are now git-ignored |
+| 18:1x | Ground-truth check crashed: SQLite returns booleans as 0/1, so boolean indexing failed | Cast to `bool` after loading |
+| 18:2x | First uplift run put 80% of customers in "persuadable"; flagged sleeping dogs were no better than chance | Persuadable became relative (top 40% and ≥ +3 pp); sleeping-dog threshold tightened to −3 pp |
+| 18:3x | Uplift trees overfit (holdout ×2.1, ground-truth Spearman 0.05) | Compared three model sizes against the answer key; switched to small, regularised trees (×2.5, Spearman 0.14) and added a third past campaign |
+| 18:5x | The holdout check ranked by "best of 5 arms", which is noisy (×1.2) | It now ranks by the pooled any-offer model it actually measures (×1.69) |
+| 18:5x | Hillstrom conversions (0.5% rate) underfit with the small trees (×0.87) | Larger trees for the 64k-row Hillstrom data (×1.24) |
+| 19:0x | CLV was `NaN` for never-bought customers; reason text said "Only 0 visits" | Prior purchase rate for never-bought; reason text rewritten ("No visits in the last 30 days") |
+| 19:50 | Both sessions committed in the same folder; the main session had been staging with `git add -A` | Each session now stages only its own files by name (see CLAUDE.md, "Two sessions") |
 | 17:00 | Two copies each of the API server and the bot were left running | Still open: Telegram allows only one polling bot per token, so stop the extra copies |
 
 ## 9. Timeline
@@ -503,6 +595,9 @@ All times IST, Thu 22 Oct 2026.
 - **17:18, main:** step 2 starts: scikit-learn added, offer mechanics and past randomised campaigns added to the
   simulator, then the feature pipeline and churn model. Re-seeded with the campaigns (8/8 still pass).
 - **17:35, docs:** this documentation file is created, and the standing update rule is added to CLAUDE.md.
+- **17:40–19:05, main:** uplift (validated on Hillstrom), CLV, segments and the training script built; models tuned against the answer key; a third past campaign added and the DB re-seeded (8/8 realism still pass). 26 tests pass.
+- **19:10–19:45, main:** the user asks what the dataset is, whether models train on it, what churn/uplift/CLV mean, and how the models were tested. Claude explains, and flags that per-offer uplift is unreliable for 3 of 5 offer types (not mentioned in the first step 2 summary).
+- **19:55, main:** this log updated with step 2 and full test results; step 2 committed with only the main session's files; the docs session is messaged with the boundaries.
 
 ## 10. Open items and the user's to-dos
 
@@ -513,6 +608,7 @@ All times IST, Thu 22 Oct 2026.
 - [ ] Share https://t.me/Dilnazecom_bot with classmates, and recruit 3–5 testers by step 5.
 - [ ] Delete `backend/offeriq.db.stale` (378 MB leftover) when convenient.
 - [ ] Step 8: free container host, Neon and Vercel accounts; choose a dashboard password.
+- [ ] **Decide for step 3:** model picks *who* gets an offer, measured campaign effects pick *which* offer (proposed by Claude), or improve the per-offer models first.
 
 ## 11. Headline numbers (for the 2-page PDF)
 
@@ -520,8 +616,12 @@ All times IST, Thu 22 Oct 2026.
 |---|---|
 | Real data used | 3 public datasets: Amazon Reviews 2023 (~52k products, ~1.65M ratings sampled), UCI Online Retail II (1.07M transactions), Hillstrom RCT (64k customers) |
 | Catalogue | 15,145 real products in 10 categories, priced in ₹ |
-| Synthetic world | 5,000 customers · ~1.99M events · ~25.8k orders · 12 months · 2 past A/B campaigns |
+| Synthetic world | 5,000 customers · ~2.0M events · ~26.1k orders · 12 months · 3 past A/B campaigns |
 | Realism | 8/8 checks pass against real data |
-| Tests | 17 passing; lint clean |
+| Churn model | AUC 0.865 on held-out customers; Brier 0.151 vs 0.249 baseline |
+| Offer effects (measured, randomised) | +3.8 pp (nudge) to +6.3 pp (₹100 off) extra 14-day purchase rate |
+| Uplift targeting | Top 30% get 1.69× the average uplift (held out); method confirmed on real Hillstrom data (×1.35 visits, ×1.24 purchases) |
+| Known weak spot | Per-person *which offer* is unreliable for 3 of 5 offer types; sleeping dogs not identifiable |
+| Tests | 26 passing; lint clean |
 | Bot | @Dilnazecom_bot, live in polling mode |
 | Safety design | 7 guardrail layers, 6-tier fallback (3 tiers without AI), models blocked from ground truth |

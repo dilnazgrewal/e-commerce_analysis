@@ -84,6 +84,10 @@ cd frontend && npm install && npm run dev           # dashboard on http://localh
 - Python 3.12, full type hints, Pydantic v2 models for every boundary (API, policy, Claude I/O), ruff for lint/format.
 - Money is integer **₹ (INR)**, formatted `en-IN` (₹1,49,999). Time is **IST (Asia/Kolkata)**: the DB stores
   naive IST wall-clock datetimes; the API attaches `+05:30` at the boundary.
+- Models: `scripts/train_models.py` → `customer_scores` + `model_runs` tables and `calibration/model_report.json`.
+  Features are point-in-time (`build_features(tables, as_of)` only sees rows before `as_of`). Uplift is learned
+  from the platform's past randomised campaigns (`campaign_assignments`), never from hidden traits; the
+  ground-truth comparison lives in the script, outside `app/`. Uplift models are kept small on purpose.
 - Data pipeline: `scripts/bootstrap_data.py` (sampled downloads → `calibration/`), then `scripts/seed_db.py`
   (population + 12-month history → DB + `calibration/realism_report.json`). Market assumptions that real data
   doesn't cover live in `calibration/india.yaml` — edit there, never hard-code them.
@@ -106,12 +110,24 @@ feature, dataset, model result, decision, or notable fix lands, update it **in t
 - a timeline line (IST time, which session) and the "Last updated" stamp; keep §11 headline numbers current.
 Never put secrets, tokens, or `.env` values in it.
 
+## Two sessions in this folder
+
+The user runs a **main build session** and a **docs session** side by side. Context is shared through files
+(this file, `docs/PROJECT_LOG.md`, `calibration/*_report.json`, `git log`), never through chat.
+- **Build session** owns `backend/`, `frontend/`, `scripts/`, `calibration/`, and is the only one that runs
+  `seed_db.py` / `train_models.py` (they overwrite `offeriq.db` and the reports). It adds facts for each step to
+  `docs/PROJECT_LOG.md` in the same commit.
+- **Docs session** reads everything but writes only in `docs/` (PDFs and log wording). It never edits code or data
+  and never re-seeds or retrains.
+- Both stage **only their own files by name** (`git add docs/PROJECT_LOG.md`), never `git add -A` or `git add .`,
+  and never commit the other session's uncommitted work. Neither pushes; the user does.
+
 ## Progress
 
 - [x] Plan approved (full plan: section-by-section in the planning session)
 - [x] 0  Repo skeleton, CLAUDE.md, README, bot replies to /start (@Dilnazecom_bot)
 - [x] 1  Data ingest + calibration + synthetic generator + realism report
-- [ ] 2  Features, churn, uplift (validated on Hillstrom), CLV, segments
+- [x] 2  Features, churn, uplift (validated on Hillstrom), CLV, segments (`scripts/train_models.py`)
 - [ ] 3  Policy schema, rules engine, message checks, property tests
 - [ ] 3b Rules-only next-best-offer (T4), segment fallbacks (T5), templates — works with no AI
 - [ ] 4  Claude offer agent + harness (L0–L6) + T1–T3 + audit log + red-team tests

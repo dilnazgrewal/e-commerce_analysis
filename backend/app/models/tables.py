@@ -91,6 +91,21 @@ class OrderItem(SQLModel, table=True):
     price_inr: int
 
 
+class CampaignAssignment(SQLModel, table=True):
+    """Past randomised campaigns (a platform's A/B history). Control rows have no offer."""
+
+    __tablename__ = "campaign_assignments"
+
+    id: int | None = Field(default=None, primary_key=True)
+    campaign_id: str = Field(index=True)
+    customer_id: str = Field(index=True, foreign_key="customers.customer_id")
+    arm: str
+    offer_type: str | None = None
+    offer_value: float | None = None
+    sent_at: datetime
+    valid_until: datetime
+
+
 class SimHiddenTrait(SQLModel, table=True):
     """Simulator ground truth. Analytics and models must NEVER read this table."""
 

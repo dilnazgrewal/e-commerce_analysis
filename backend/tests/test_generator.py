@@ -11,9 +11,9 @@ from sqlmodel import SQLModel
 from app import models  # noqa: F401  (registers tables)
 from app.data.calibrate import load_india
 from app.data.generate import build_population, load_calibration, load_catalogue
+from app.data.history import generate_history
 from app.data.paths import CALIBRATION_FILE, CATALOGUE_FILE
 from app.data.realism import build_report
-from app.data.simulator import new_state, simulate
 
 pytestmark = pytest.mark.skipif(
     not (CALIBRATION_FILE.exists() and CATALOGUE_FILE.exists()), reason="run scripts/bootstrap_data.py first"
@@ -25,9 +25,8 @@ AS_OF = date(2026, 10, 22)
 def world():
     calibration, india, catalogue = load_calibration(), load_india(), load_catalogue()
     population = build_population(1500, AS_OF, seed=3, calibration=calibration, india=india)
-    state = new_state(population, catalogue, india, seed=3)
-    events, orders, items = simulate(state, AS_OF - timedelta(days=365), AS_OF)
-    return population, events, orders, items, catalogue, calibration, india
+    history = generate_history(population, catalogue, india, AS_OF, seed=3)
+    return population, history.events, history.orders, history.items, catalogue, calibration, india, history
 
 
 def test_population_columns_match_database_tables(world):
@@ -71,7 +70,7 @@ def test_event_log_is_consistent(world):
 
 
 def test_synthetic_data_passes_realism_checks(world):
-    population, events, orders, items, catalogue, calibration, india = world
+    population, events, orders, items, catalogue, calibration, india, _ = world
     report = build_report(population.customers, events, orders, items, catalogue, calibration, india)
     failed = [c for c in report["checks"] if not c["passed"]]
     assert not failed, failed
@@ -81,6 +80,7 @@ def test_models_never_read_hidden_traits():
     """Only the simulator/seed code may touch the ground-truth table."""
     app_dir = Path(__file__).resolve().parents[1] / "app"
     allowed = {"models/tables.py", "models/__init__.py", "data/generate.py", "data/simulator.py"}
+    # analytics/, agent/, rules/ … must never appear here
     offenders = [
         str(path.relative_to(app_dir)).replace("\\", "/")
         for path in app_dir.rglob("*.py")
@@ -90,3 +90,18 @@ def test_models_never_read_hidden_traits():
         )
     ]
     assert not offenders, offenders
+
+
+def test_past_campaigns_are_randomised_and_offers_lift_orders(world):
+    assignments, orders = world[-1].assignments, world[2]
+    assert set(assignments["campaign_id"]) == {"CMP-MAR", "CMP-MAY", "CMP-AUG"}
+    control_share = (assignments["arm"] == "control").mean()
+    assert 0.30 < control_share < 0.40
+    merged = assignments.merge(orders[["customer_id", "ts"]], on="customer_id", how="left")
+    in_window = (merged["ts"] >= merged["sent_at"]) & (merged["ts"] < merged["valid_until"])
+    keys = ["campaign_id", "customer_id", "arm"]
+    bought = merged.assign(hit=in_window).groupby(keys)["hit"].any().reset_index()
+    rate = bought.groupby(bought["arm"] == "control")["hit"].mean()
+    assert rate[False] > rate[True]  # offers raise the 14-day purchase rate on average
+    redeemed = orders["coupon_code"].fillna("").str.startswith("CMP-")
+    assert redeemed.sum() > 0
