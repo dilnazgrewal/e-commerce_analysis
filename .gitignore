@@ -42,3 +42,6 @@ test-results/
 Thumbs.db
 .vscode/
 .idea/
+
+# Exported chat transcripts (local cross-checking only, never push)
+docs/transcripts/

@@ -55,6 +55,67 @@ buy. It then:
 4. checks everything before sending
 5. measures the true incremental effect with holdout groups
 
+### 1.1 Key ideas in plain words
+
+These were explained to the user in the main session on 22 Oct (19:10–19:45 IST).
+
+**What the system does.** It looks at each customer's behaviour and decides whether a particular offer would make
+them buy more, or keep buying, *because of* the offer. It then sends only the offers worth their cost.
+
+**Where the data lives.** There are three layers:
+1. **Real public data** (`data/raw/`): used only to make the fake customers behave realistically.
+2. **What we learned from it** (`calibration/`).
+3. **The synthetic dataset itself**: a SQLite database, `backend/offeriq.db` (≈394 MB), with tables `customers`,
+   `products`, `events`, `orders`, `order_items`, `campaign_assignments`, `customer_scores` and
+   `sim_hidden_traits` (the answer key, which models are blocked from reading).
+   It is rebuilt by `scripts/seed_db.py` and can be opened with DB Browser for SQLite.
+
+**What the models are trained on.** The **synthetic platform's own data** (orders, visits, past campaigns), not the
+real datasets. Real data only shapes how realistic the customers are. The one exception is a validation run of the
+uplift method on the real Hillstrom experiment.
+
+**The four scores:**
+
+| Term | Plain meaning |
+|---|---|
+| **Churn** | Chance the customer **stops buying**: no order in the next 60 days |
+| **Baseline** | Chance they buy in the next 14 days **with no offer** |
+| **Uplift** | How much **extra** chance of buying an offer *causes*. A discount to someone who would buy anyway is wasted margin |
+| **CLV** (customer lifetime value) | Money they are likely to spend over the next 90 days (revenue, and the margin on it) |
+| **Segment** | A label a marketer understands. Uplift groups say *whether to send an offer*: persuadable, sure thing, lost cause, sleeping dog. Lifecycle says *where they are*: new, active, VIP, at-risk, lapsed, window-shopper, bargain-hunter |
+
+**Worked example from the real data: customer C02588** (Pune, Tier-1, pays COD, Prime member, joined Dec 2025).
+- Last order 270 days ago: a ₹549 kids' shampoo, and before that a ₹239 item.
+- In May it was in the ₹100-off test group; in March and August it was in the control group.
+- Scores: churn **80%** ("Only 3 visits in the last 90 days", "No order in 270 days"); baseline 6.8%.
+- Uplift: 10% off **+6.6 pp**, 2× points **+7.5 pp** (its best offer). CLV ₹576 over 90 days.
+- Segments: **lapsed**, **lost cause**. Its +7.5 pp is below the persuadable cut-off (top 40%, ≥ +8.7 pp).
+
+**The core idea, as the user asked it.** "If a customer about to leave gets a 60% discount and stays, even if that
+order loses money, is it ultimately a profit?" The answer is *sometimes*. The engine sends an offer only when:
+
+`uplift × future profit  >  chance they redeem × discount`
+
+Everyone who redeems gets the discount, including people who would have bought anyway.
+
+Worked example (round illustrative numbers, not real data): ₹1,000 orders at 25% margin; ₹1,500 future profit if
+the customer stays; 20% chance they stay with no offer.
+
+| Offer | Chance they stay | Uplift | Expected gain | Expected cost | Net |
+|---|---|---|---|---|---|
+| 60% off | 50% | +30 pp | +₹450 | −₹300 | **+₹150** |
+| 20% off | 40% | +20 pp | +₹300 | −₹80 | **+₹220** |
+
+So the 60% offer is profitable, but the 20% offer is *more* profitable. The engine looks for **the cheapest offer
+that still works**, inside limits the business sets:
+- category margins (60% off electronics at 8% margin loses ≈ ₹520 per ₹1,000)
+- discount dependency
+- budget and frequency caps
+- sleeping dogs
+
+One caveat: today's uplift measures 14-day purchases, not long-term retention. Step 3 combines it with churn and
+CLV, so the profit maths reflects long-term value.
+
 ## 2. Decisions and where they came from
 
 | Decision | Made by | When (IST, 22 Oct) | Why |
@@ -133,6 +194,34 @@ The 10 categories:
 - Sports & Outdoors
 - Toys & Games
 - Books
+
+**Per-category detail** (exact counts from the sampled files in `data/raw/amazon/` and the built catalogue):
+
+| Category | Product records sampled | …with a USD price | Ratings sampled | Users in ratings | Kept in catalogue | Median ₹ | 10th–90th pct ₹ | Price factor | Margin % | Real volume share | Synthetic order share |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Electronics | 4,693 | 1,510 | 165,254 | 18,499 | 1,147 | ₹1,899 | ₹649–₹16,699 | 0.95 | 8 | 13.4% | 13.4% |
+| Cell Phones & Accessories | 4,759 | 1,037 | 165,339 | 19,796 | 824 | ₹899 | ₹489–₹1,899 | 0.80 | 6 | 6.4% | 6.3% |
+| Clothing, Shoes & Jewelry | 5,993 | 1,224 | 165,153 | 18,735 | 898 | ₹699 | ₹309–₹2,449 | 0.35 | 45 | 20.2% | 20.2% |
+| Beauty & Personal Care | 5,369 | 2,055 | 165,128 | 20,369 | 1,823 | ₹649 | ₹279–₹2,049 | 0.45 | 35 | 7.3% | 6.8% |
+| Home & Kitchen | 4,764 | 1,560 | 165,290 | 17,821 | 1,173 | ₹899 | ₹399–₹4,349 | 0.50 | 28 | 20.6% | 20.9% |
+| Grocery & Gourmet Food | 6,635 | 2,483 | 164,986 | 18,131 | 2,109 | ₹599 | ₹249–₹1,649 | 0.40 | 12 | 4.4% | 4.1% |
+| Health & Household | 4,659 | 2,094 | 165,086 | 17,609 | 1,840 | ₹749 | ₹339–₹2,149 | 0.45 | 25 | 7.8% | 8.3% |
+| Sports & Outdoors | 5,797 | 1,686 | 165,216 | 19,617 | 1,325 | ₹1,049 | ₹349–₹4,259 | 0.50 | 30 | 6.0% | 6.5% |
+| Toys & Games | 4,809 | 2,487 | 165,301 | 17,791 | 2,140 | ₹849 | ₹349–₹2,804 | 0.50 | 30 | 5.0% | 4.7% |
+| Books | 4,710 | 3,719 | 164,690 | 13,450 | 1,866 | ₹369 | ₹159–₹1,099 | 0.30 | 22 | 9.0% | 8.8% |
+| **Total** | **52,188** | **19,855** | **1,651,443** | **181,818** | **15,145** | | | | | 100% | 100% |
+
+How to read it:
+- *Product records sampled* are complete JSON lines read from 25 random 600 KB slices of each metadata file.
+- *…with a USD price*: many Amazon listings have no price, so only these could be priced in ₹.
+- *Kept in catalogue* also needs a title, an image, ≥ 5 ratings and a final price of ₹49–₹2,00,000.
+- *Ratings sampled* are 16 random 600 KB slices of each 5-core rating file. The first and last user of each slice
+  are dropped, because their histories may be cut off.
+- *Users* is the number of distinct users in those ratings. Users can repeat across categories, so the total
+  counts some people more than once.
+- *Real volume share* comes from the size of each category's full (0-core) rating file.
+- *Synthetic order share* is the share of items bought in the 12-month synthetic history.
+- *Price factor* and *Margin %* are India-layer assumptions from `india.yaml` (§4.3), not measured data.
 
 ### 4.2 Calibration: turning real data into parameters ([calibrate.py](../backend/app/data/calibrate.py))
 
@@ -607,6 +696,7 @@ All times IST, Thu 22 Oct 2026.
 - **17:40–19:05, main:** uplift (validated on Hillstrom), CLV, segments and the training script built; models tuned against the answer key; a third past campaign added and the DB re-seeded (8/8 realism still pass). 26 tests pass.
 - **19:10–19:45, main:** the user asks what the dataset is, whether models train on it, what churn/uplift/CLV mean, and how the models were tested. Claude explains, and flags that per-offer uplift is unreliable for 3 of 5 offer types (not mentioned in the first step 2 summary).
 - **19:55, main:** this log updated with step 2 and full test results; step 2 committed with only the main session's files; the docs session is messaged with the boundaries.
+- **20:05–20:10, main:** the user asks whether the docs session can document everything. Claude explains that it reads files, not chats. Added: a per-category data table (§4.1), the plain-English concepts (§1.1), and an export of the main chat's transcript under `docs/transcripts/` (git-ignored, for cross-checking only).
 - **~20:05, docs:** wording pass after step 2. Session roles, the database table list and the decisions table
   updated; two ambiguous model results (sleeping-dog detection, persuadable threshold) reworded; the problems table
   put in time order. No numbers changed.

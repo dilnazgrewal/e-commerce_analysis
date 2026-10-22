@@ -121,6 +121,8 @@ The user runs a **main build session** and a **docs session** side by side. Cont
   and never re-seeds or retrains.
 - Both stage **only their own files by name** (`git add docs/PROJECT_LOG.md`), never `git add -A` or `git add .`,
   and never commit the other session's uncommitted work. Neither pushes; the user does.
+- `docs/transcripts/` (git-ignored) holds readable exports of the main chat and the approved plan, so the docs
+  session can cross-check the log against what was actually said. Facts still belong in `docs/PROJECT_LOG.md`.
 
 ## Progress
 
