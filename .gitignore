@@ -15,6 +15,9 @@ data/raw/*
 *.db-shm
 *.db.stale
 
+# Local progress reports (generated PDFs)
+docs/*.pdf
+
 # Python
 __pycache__/
 *.py[cod]
