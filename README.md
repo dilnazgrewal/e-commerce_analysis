@@ -30,11 +30,27 @@ npm install
 npm run dev                                # dashboard → http://localhost:5173
 ```
 
-## Data
+## Data: synthetic customers, calibrated on real data
 
-All customers are **synthetic**. Their behaviour is calibrated on public real-world data — the Amazon Reviews 2023
-catalogue and review histories (McAuley Lab), UCI Online Retail II transactions, and the Hillstrom randomised e-mail
-experiment — so they behave like real shoppers without exposing any real person.
+All customers are **synthetic**. No real person's data is stored. Their behaviour is calibrated on public
+real-world datasets so they act like real shoppers:
+
+| Real source | What we take from it |
+|---|---|
+| **Amazon Reviews 2023** (McAuley Lab), sampled with HTTP range requests across 10 categories | A catalogue of ~15k real products (titles, brands, images, ratings, popularity), prices converted to ₹ price points; category volumes; real per-user purchase-gap distributions |
+| **UCI Online Retail II** (1.07M real transactions) | A **BG/NBD** model fitted by maximum likelihood: how purchase rates and churn vary between customers |
+| **Hillstrom e-mail experiment** (64k customers, randomised) | Real causal offer effects by recency × spend history, which set how strongly each synthetic customer responds to an offer |
+| `calibration/india.yaml` | Editable Indian-market assumptions: city tiers, COD/UPI mix, RTO, margins, festive calendar, language by state |
+
+```bash
+cd backend
+uv run python ../scripts/bootstrap_data.py   # sample real data → calibration/ (~300 MB download, once)
+uv run python ../scripts/seed_db.py          # 5,000 customers + 12-month event log → DB + realism report
+```
+
+`calibration/realism_report.json` compares the synthetic data with the real data. It checks the shape of purchase
+gaps (KS test against UCI and Amazon), repeat rate, category mix, price distribution, cart abandonment, conversion and
+COD returns. The tests fail if any check drifts past its threshold.
 
 ## Project guide
 

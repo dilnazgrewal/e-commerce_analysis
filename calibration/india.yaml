@@ -1,0 +1,131 @@
+# India market assumptions for the OfferIQ simulator.
+#
+# Everything measured from real data (purchase-rate heterogeneity, churn, purchase gaps, product
+# popularity, prices, category mix, offer response) comes from calibration.json. This file holds the
+# India-specific layer that public datasets do not cover. Values are deliberately round, documented
+# estimates of the Indian e-commerce market; the marketing team can edit them and re-run the generator.
+
+currency: INR
+timezone: Asia/Kolkata
+usd_inr: 88.0                     # nominal FX used before the category price-level adjustment
+
+# Indian shelf price ≈ US price × FX × factor. Fashion, books and groceries sell at much lower
+# absolute prices in India than in the US; electronics/phones are close to global prices.
+category_price_factor:
+  Electronics: 0.95
+  Cell_Phones_and_Accessories: 0.80
+  Clothing_Shoes_and_Jewelry: 0.35
+  Beauty_and_Personal_Care: 0.45
+  Home_and_Kitchen: 0.50
+  Grocery_and_Gourmet_Food: 0.40
+  Health_and_Household: 0.45
+  Sports_and_Outdoors: 0.50
+  Toys_and_Games: 0.50
+  Books: 0.30
+
+# Gross margin by category (drives max-discount rules). Low for electronics/phones, high for fashion.
+category_margin_pct:
+  Electronics: 8
+  Cell_Phones_and_Accessories: 6
+  Clothing_Shoes_and_Jewelry: 45
+  Beauty_and_Personal_Care: 35
+  Home_and_Kitchen: 28
+  Grocery_and_Gourmet_Food: 12
+  Health_and_Household: 25
+  Sports_and_Outdoors: 30
+  Toys_and_Games: 30
+  Books: 22
+
+# Share of orders that end up returned (customer return) — fashion is by far the highest.
+category_return_rate:
+  Electronics: 0.06
+  Cell_Phones_and_Accessories: 0.07
+  Clothing_Shoes_and_Jewelry: 0.22
+  Beauty_and_Personal_Care: 0.05
+  Home_and_Kitchen: 0.08
+  Grocery_and_Gourmet_Food: 0.02
+  Health_and_Household: 0.04
+  Sports_and_Outdoors: 0.08
+  Toys_and_Games: 0.06
+  Books: 0.03
+
+# Mean orders per year for an active customer. Purchase-rate *shape* comes from the BG/NBD fit on
+# real transactions; only the mean is rescaled to Indian consumer e-commerce.
+orders_per_year_active: 7.0
+items_per_order_extra_mean: 0.35  # items per order = 1 + Poisson(this)
+
+funnel:
+  sessions_per_order: 11          # ≈ 9% session-to-order conversion
+  views_per_session_mean: 4.5
+  search_share_of_sessions: 0.55
+  cart_abandonment_rate: 0.70     # widely reported global average ≈ 70%; add-to-cart rate is derived from it
+  browse_only_sessions_per_month: 1.5   # window-shopping by customers who have stopped buying
+
+city_tiers:
+  tier1:
+    share: 0.38
+    cities: [[Delhi, Delhi], [Mumbai, Maharashtra], [Bengaluru, Karnataka], [Hyderabad, Telangana],
+             [Chennai, Tamil Nadu], [Kolkata, West Bengal], [Pune, Maharashtra], [Ahmedabad, Gujarat]]
+  tier2:
+    share: 0.34
+    cities: [[Ludhiana, Punjab], [Amritsar, Punjab], [Jalandhar, Punjab], [Chandigarh, Chandigarh],
+             [Jaipur, Rajasthan], [Lucknow, Uttar Pradesh], [Indore, Madhya Pradesh], [Nagpur, Maharashtra],
+             [Surat, Gujarat], [Kochi, Kerala], [Coimbatore, Tamil Nadu], [Bhopal, Madhya Pradesh],
+             [Patna, Bihar], [Vadodara, Gujarat]]
+  tier3:
+    share: 0.28
+    cities: [[Bathinda, Punjab], [Patiala, Punjab], [Moga, Punjab], [Hoshiarpur, Punjab], [Kota, Rajasthan],
+             [Ajmer, Rajasthan], [Dehradun, Uttarakhand], [Siliguri, West Bengal], [Udaipur, Rajasthan],
+             [Gorakhpur, Uttar Pradesh], [Madurai, Tamil Nadu], [Hubli, Karnataka]]
+
+# Payment preference by tier: COD is far more common outside the metros.
+payment_mix:
+  tier1: {UPI: 0.52, card: 0.23, COD: 0.25}
+  tier2: {UPI: 0.48, card: 0.14, COD: 0.38}
+  tier3: {UPI: 0.40, card: 0.08, COD: 0.52}
+cod_rto_rate: 0.18                # COD orders refused/undelivered and returned to origin
+
+prime_share: {tier1: 0.34, tier2: 0.22, tier3: 0.12}
+device_mix: {android: 0.82, ios: 0.08, web: 0.10}
+acquisition_mix: {organic: 0.42, ads: 0.28, social: 0.18, referral: 0.12}
+age_band_mix: {"18-24": 0.27, "25-34": 0.38, "35-44": 0.20, "45-54": 0.10, "55+": 0.05}
+gender_mix: {female: 0.46, male: 0.53, other: 0.01}   # fairness auditing only, never used for targeting
+
+# Language preference by state group.
+language_by_state:
+  Punjab: {pa: 0.35, hi-Latn: 0.45, en: 0.20}
+  Chandigarh: {pa: 0.20, hi-Latn: 0.45, en: 0.35}
+  hindi_belt: {hi-Latn: 0.70, en: 0.30}
+  default: {en: 0.70, hi-Latn: 0.30}
+hindi_belt_states: [Delhi, Uttar Pradesh, Madhya Pradesh, Rajasthan, Bihar, Uttarakhand]
+
+points:
+  earn_per_100_inr: 1             # reward points earned per ₹100 spent (2× for Prime)
+  inr_per_point: 1
+  expiry_days: 365
+
+# Day-of-week demand (Mon..Sun): mild weekend lift.
+weekday_weights: [0.97, 0.96, 0.96, 0.98, 1.02, 1.07, 1.04]
+
+# Share of the population that reacts *negatively* to being contacted ("sleeping dogs").
+sleeping_dog_share: 0.06
+# Spread of individual offer responsiveness around the Hillstrom segment effect (log-normal sigma).
+responsiveness_sigma: 0.6
+
+# Hour-of-day shopping profile in IST (evening-heavy, mobile-first).
+hour_weights: [1, 0.6, 0.3, 0.2, 0.2, 0.3, 0.6, 1.2, 1.8, 2.2, 2.6, 2.8,
+               3.0, 3.1, 2.9, 2.8, 2.9, 3.2, 3.6, 4.2, 4.8, 5.2, 4.4, 2.4]
+
+# Demand multipliers around festivals and marketplace sale events (approximate 2025–26 dates).
+festive_calendar:
+  - {name: Diwali 2025 (Great Indian Festival tail), start: 2025-10-15, end: 2025-10-21, multiplier: 2.2}
+  - {name: Black Friday / Christmas, start: 2025-11-28, end: 2025-12-25, multiplier: 1.15}
+  - {name: Lohri / Makar Sankranti, start: 2026-01-10, end: 2026-01-14, multiplier: 1.2}
+  - {name: Republic Day sale, start: 2026-01-17, end: 2026-01-26, multiplier: 1.6}
+  - {name: Holi, start: 2026-02-27, end: 2026-03-04, multiplier: 1.25}
+  - {name: Baisakhi, start: 2026-04-10, end: 2026-04-14, multiplier: 1.2}
+  - {name: Summer sale, start: 2026-05-01, end: 2026-05-07, multiplier: 1.4}
+  - {name: Prime Day, start: 2026-07-11, end: 2026-07-13, multiplier: 1.9}
+  - {name: Independence Day / Raksha Bandhan, start: 2026-08-08, end: 2026-08-28, multiplier: 1.35}
+  - {name: Great Indian Festival, start: 2026-09-26, end: 2026-10-20, multiplier: 2.0}
+  - {name: Dhanteras / Diwali 2026, start: 2026-11-01, end: 2026-11-08, multiplier: 2.4}

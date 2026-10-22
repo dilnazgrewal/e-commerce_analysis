@@ -82,7 +82,11 @@ cd frontend && npm install && npm run dev           # dashboard on http://localh
 ## Conventions
 
 - Python 3.12, full type hints, Pydantic v2 models for every boundary (API, policy, Claude I/O), ruff for lint/format.
-- Money is integer **₹ (INR)**, formatted `en-IN` (₹1,49,999). Time is timezone-aware, **IST (Asia/Kolkata)**.
+- Money is integer **₹ (INR)**, formatted `en-IN` (₹1,49,999). Time is **IST (Asia/Kolkata)**: the DB stores
+  naive IST wall-clock datetimes; the API attaches `+05:30` at the boundary.
+- Data pipeline: `scripts/bootstrap_data.py` (sampled downloads → `calibration/`), then `scripts/seed_db.py`
+  (population + 12-month history → DB + `calibration/realism_report.json`). Market assumptions that real data
+  doesn't cover live in `calibration/india.yaml` — edit there, never hard-code them.
 - Rules are pure functions with no I/O; every rule returns a named `Check(rule, passed, reason)`.
 - Claude models: `claude-sonnet-5-5` (offer agent, bot chat), `claude-haiku-5-5` (copy, critic, T3 fallback,
   batch enrichment), `claude-opus-5-5` (plain-English rule authoring, analyst). Use prompt caching for the policy and
@@ -95,8 +99,8 @@ cd frontend && npm install && npm run dev           # dashboard on http://localh
 ## Progress
 
 - [x] Plan approved (full plan: section-by-section in the planning session)
-- [ ] 0  Repo skeleton, CLAUDE.md, README, bot replies to /start — share the link
-- [ ] 1  Data ingest + calibration + synthetic generator + realism report
+- [x] 0  Repo skeleton, CLAUDE.md, README, bot replies to /start (@Dilnazecom_bot)
+- [x] 1  Data ingest + calibration + synthetic generator + realism report
 - [ ] 2  Features, churn, uplift (validated on Hillstrom), CLV, segments
 - [ ] 3  Policy schema, rules engine, message checks, property tests
 - [ ] 3b Rules-only next-best-offer (T4), segment fallbacks (T5), templates — works with no AI
