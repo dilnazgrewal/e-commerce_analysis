@@ -8,8 +8,8 @@
 > feature, dataset, decision or fix lands (rule in [CLAUDE.md](../CLAUDE.md), section "Documentation").
 > Each entry in the [timeline](#9-timeline) says which session did it.
 >
-> Last updated: **Thu 22 Oct 2026, ~22:00 IST**, after step 5 (full Telegram flow) was committed (main build session).
-> Step 4 facts were added at 21:29 by the main build session.
+> Last updated: **Thu 22 Oct 2026, ~22:05 IST**: step 5 entries checked against the code (docs session).
+> Step 5 facts were added at 21:54 by the main build session.
 
 Sessions referred to below:
 - **Main build session**: the planning-and-build chat ("E-commerce analysis system"). It wrote the plan and
@@ -435,7 +435,8 @@ The re-seed with three past campaigns (step 2) still passes 8/8: 2,001,305 event
 - **Keys verified** without printing them:
   - the Telegram token belongs to @Dilnazecom_bot
   - the Anthropic key works with Sonnet 5.5, Haiku 5.5 and Opus 5.5
-  - the user's chat ID (`8415321768`) is kept for a future `ADMIN_CHAT_ID`
+  - the user's own Telegram chat ID was identified for a future `ADMIN_CHAT_ID` (it lives only in `.env`, not here,
+    because this repo will be public)
 
 ### Step 1: data pipeline (commit `0cd2511`, 17:06 IST)
 
@@ -762,7 +763,7 @@ end to end: quiz → digital twin → browsing → an offer chosen by Claude and
 | File | What it does |
 |---|---|
 | [telegram_bot.py](../backend/app/bot/telegram_bot.py) | All handlers: /start, consent, quiz, /browse, cart, offer cards and buttons, /offer, /history, /stop, /resume, /help; jobs for the abandoned cart and the quiet-hours queue; the Telegram command menu |
-| [twin.py](../backend/app/bot/twin.py) | Quiz → most similar synthetic customer (tier +3, top category +3, any top-3 category +1, order frequency +2, usual spend +2, persuadable +2, positive uplift +1, sleeping dog −3, Punjab twin for Punjabi +1, rules-holdout −100); live holdout by chat |
+| [twin.py](../backend/app/bot/twin.py) | Quiz → most similar synthetic customer (tier +3, top category +3, any top-3 category +1, order frequency +2, usual spend +2, persuadable +2, positive uplift +1, sleeping dog −3, Punjab twin for Punjabi +1, rules-holdout −100, plus a random tie-breaker of up to 0.5); live holdout by chat |
 | [store.py](../backend/app/bot/store.py) | Bot users, live events, products, claims, feedback, history, and **layer L5**: the send-time re-check and exactly-once logging |
 | [service.py](../backend/app/bot/service.py) | One call: twin context (with the classmate's first name and language) → duplicate check → AI pipeline → L5 → log |
 | [cards.py](../backend/app/bot/cards.py) | Quiz questions, twin card, product cards, offer card, "Why me?" text, history |
@@ -886,8 +887,10 @@ calls, a circuit breaker, a daily token budget, a kill switch.
 - step 4: **L0** (input guard), **L2** (schema guard), Claude behind L1, and tiers **T1–T3**, with the harness (kill
   switch, token budget, circuit breaker, timeout)
 
-**Still to come:** **L5** (send-time re-check inside a DB transaction) with the bot in step 5, and **L6** (independent
-re-checker, canaries) with the Health page in step 4b.
+- step 5: **L5** (send-time re-check inside a DB transaction, exactly-once logging)
+
+**Still to come:** **L6** (independent re-checker, canaries) with the Health page in step 4b. Two-way chat (L0 on
+free text) arrives in step 7.
 
 **Fallback ladder (T1–T6):**
 1. **T1:** Sonnet agent
@@ -937,7 +940,7 @@ tested in the past campaigns (nudge, 2× points, free shipping, 10% off, ₹100 
 
 Prompt caching is used for the policy and catalogue context.
 
-**Telegram flow:**
+**Telegram flow** (as planned; **built in step 5**, with a 5-tap quiz because language is asked first; see §5):
 1. `/start`
 2. 4-tap quiz
 3. matched to a **digital twin**
@@ -1017,7 +1020,7 @@ rules + AI beats blanket discounting. A CLV backtest is also planned.
 | 3 / 3b | Fri–Sat | Policy schema, rules engine, property tests; rules-only fallback (T4–T6) | ✅ Done (Thu, `c862c80`) |
 | 4 | Sat | Claude offer agent with guardrails and T1–T3, audit log | ✅ Done (Thu, `c67da92`) |
 | 4b | Sat | Health checks: independent re-checker, canary customers, golden evals | Next (or step 5 first; the user picks) |
-| 5 | Sat | Full Telegram flow (quiz → twin → offer card → feedback, holdout) | Planned |
+| 5 | Sat | Full Telegram flow (quiz → twin → offer card → feedback, holdout) | ✅ Done (Thu, `93da412`) |
 | 6 | Sat–Sun | React dashboard, API, live updates (SSE) | Planned |
 | 7 | Sun | Plain-English rule editing with dry run, campaigns, policy simulation, AI analyst, two-way chat | Planned |
 | 8 | Mon | Deploy (container host + Neon + Vercel), classmate test round, README, demo script | Planned |
@@ -1053,7 +1056,7 @@ cd ../frontend && npm install && npm run dev                # dashboard → http
 | 15:39 / 16:5x | The Windows console (cp1252) crashed printing "≤" and "→" | The scripts switch stdout to UTF-8 |
 | 16:55 | The generator test failed with `KeyError: 'customers'`: the test never loaded the table definitions | The test now imports `app.models` (docs session) |
 | 16:58 | The 1.94M-event DB load failed with "database is locked" on a 378 MB leftover DB from an earlier partial run | The old file was moved to `offeriq.db.stale` (not deleted) and a fresh one seeded. `*.db.stale` and SQLite side files are now git-ignored |
-| 17:00 | Two copies each of the API server and the bot were left running | Still open: Telegram allows only one polling bot per token, so stop the extra copies |
+| 17:00 | The process list seemed to show two copies each of the API server and the bot | **A false alarm, corrected at ~22:05.** Each pair had the same start time: on Windows a venv's `python.exe` is a small launcher that starts the real interpreter as a child, so each pair was one program. There was always one API server and one bot (the step 5 bot replaced the old one at 21:51) |
 | 18:1x | Ground-truth check crashed: SQLite returns booleans as 0/1, so boolean indexing failed | Cast to `bool` after loading |
 | 18:2x | First uplift run put 80% of customers in "persuadable"; flagged sleeping dogs were no better than chance | Persuadable became relative (top 40% and ≥ +3 pp); sleeping-dog threshold tightened to −3 pp |
 | 18:3x | Uplift trees overfit (holdout ×2.1, ground-truth Spearman 0.05) | Compared three model sizes against the answer key; switched to small, regularised trees (×2.5, Spearman 0.14) and added a third past campaign |
@@ -1149,12 +1152,26 @@ All times IST, Thu 22 Oct 2026.
 - **~21:35, main:** the user asks to start step 5.
 - **21:35–21:50, main:** bot tables and store (L5), twin matching, service, cards, all handlers and jobs; 14 bot tests. A smoke test on a database copy with real Claude found the "sure thing" twin problem; matching fixed.
 - **21:51, main:** the old step 0 bot process stopped; the new bot started (polling) and the real database migrated (new tables and columns, no data lost). 213 tests pass.
-- **~22:00, main:** step 5 committed.
+- **21:54, main:** step 5 committed (`93da412`).
+- **~22:05, docs:** step 5 entries checked against the code, and all match:
+  - 213 tests
+  - the twin-matching weights
+  - the 90 s cart timer and the 10% chat holdout
+  - the 4 send-time checks
+  - the 64-byte button and 1,024-character caption limits
+
+  Edits:
+  - noted the twin tie-breaker
+  - marked L5 and step 5 as built
+  - removed the user's Telegram chat ID from this log, since the repo will be public
+  - corrected the docs session's earlier "duplicate processes" report: those were Windows venv launcher plus
+    interpreter pairs, never duplicates
 
 ## 10. Open items and the user's to-dos
 
 - [ ] Push the commits (`git push`); make the repo public, or share it with the judges, before submission.
-- [ ] Stop the duplicate API and bot processes; run one bot only.
+- [x] ~~Stop the duplicate API and bot processes~~: not needed. There were never duplicates (see §8, 17:00); keep
+      running only one bot per token.
 - [ ] Optional: improve the bot in @BotFather with `/setname` (e.g. "OfferIQ: Smart Offers"), `/setdescription`
       and `/setuserpic`.
 - [ ] Share https://t.me/Dilnazecom_bot with classmates, and recruit 3–5 testers (step 5 is live). Offers asked for between 21:00 and 09:00 IST are queued until 09:00; the bot only runs while the laptop and its process are on.
