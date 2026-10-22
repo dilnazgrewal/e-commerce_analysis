@@ -8,13 +8,13 @@
 > feature, dataset, decision or fix lands (rule in [CLAUDE.md](../CLAUDE.md), section "Documentation").
 > Each entry in the [timeline](#9-timeline) says which session did it.
 >
-> Last updated: **Thu 22 Oct 2026, ~20:05 IST**, wording pass after step 2 (docs session). Step 2 facts were added
-> at 19:55 by the main build session.
+> Last updated: **Thu 22 Oct 2026, ~20:10 IST**: cross-check against the main chat's transcript (docs session).
+> Step 2 facts were added at 19:54 and 20:02 by the main build session.
 
 Sessions referred to below:
 - **Main build session**: the planning-and-build chat ("E-commerce analysis system"). It wrote the plan and
   built steps 0–2. It owns the code and data, and adds each step's facts here in the same commit.
-- **Docs session**: the side chat that verified and committed step 1, made the progress PDF, created this log and
+- **Docs session** ("Progress PDF summary"): the side chat that verified and committed step 1, made the progress PDF, created this log and
   polishes its wording. It writes only in `docs/` (see CLAUDE.md, "Two sessions in this folder").
 
 ---
@@ -127,10 +127,14 @@ CLV, so the profit maths reflects long-term value.
 | **Free cloud hosting**, so the bot stays up through judging | User | ~14:25 | Judges must be able to reach the bot |
 | **Claude never pushes**; small commits, the user pushes | User | 14:12 | The user's git workflow |
 | **6-tier fallback chain** (T1–T6) | User's idea, Claude structured it | ~14:36 | The bot must still work if the Claude API fails |
+| Build the **no-AI tiers (T4–T6) before the Claude agent** (step 3b before step 4) | Claude, in the approved plan | ~14:36 | The whole system works end to end before any AI is added |
+| **Real-time checks of live responses** (Health page, canary customers, golden evals) on top of build-time tests | User asked for tests that "in real time check and test the responses"; Claude designed them | 14:34–14:36 | Proves the guardrails keep working after deployment, not just in CI |
 | **7 guardrail layers** (L0–L6) around the AI | Claude proposed, user approved the plan | ~14:36 | The brief's core rule: every AI choice is rule-checked |
 | Python **3.12 via uv** (the system has 3.14) | Claude proposed, user approved | ~14:36 | 3.14 is too new for some ML libraries |
 | Rescale purchase frequency to **7 orders/year** | Claude (step 1) | ~15:30 | UCI is a UK wholesaler-like retailer; Indian consumer e-commerce shops more often. Only the mean changes; the *shape* of variation stays from real data |
-| **Sample Amazon by HTTP range requests** instead of downloading the multi-GB files | Claude (step 1) | ~15:23 | Downloads stay at ~55 MB instead of tens of GB |
+| **Sample Amazon by random chunks (HTTP range requests)** instead of downloading the full files | User, choosing Claude's recommended option | 15:26 | The full files are huge (e.g. Electronics reviews 22.6 GB, Clothing metadata 18 GB); sampling keeps downloads at ~55 MB |
+| Cover the **10 core Amazon categories** (list in §4.1) | User, choosing Claude's recommended option | 15:26 | Broad enough for Indian shoppers, small enough to sample quickly |
+| Optional Kaggle "Amazon Sales (India)" and RetailRocket funnel data **not used** | Claude (no Kaggle login was set up) | 15:23 | The plan made them optional; the funnel uses published benchmark ratios instead (e.g. ~70% cart abandonment, §4.3) |
 | Offer effects learned only from **past randomised campaigns** in the simulated history | Claude (step 2) | ~17:20 | Real platforms learn uplift from their own A/B tests; models must never read the hidden traits |
 | Add a **third past campaign** (`CMP-MAR`) and use **small, regularised uplift trees** | Claude (step 2) | ~18:3x | Two campaigns gave too little data per offer type, and larger trees overfit when checked against the answer key |
 | **Report the models' weak spots openly** (per-offer uplift, sleeping dogs) | Claude flagged them; the user asked how the models were tested | 19:10–19:45 | Honest evaluation; the gaps change how step 3 chooses offers |
@@ -159,8 +163,16 @@ Amazon Reviews 2023 · UCI Retail · Hillstrom       React dashboard (Rules Stud
                                                8 measurement (lift, ROI, Qini) → dashboard (live SSE)
 ```
 
-- **Input (`POST /api/events`):** `{"event_id","customer_id","type","ts"(ISO, +05:30),"product_id","price_inr","session_id","device"}`
+**Inputs** (what a platform sends in):
+- **Events (`POST /api/events`, one or a batch):** `{"event_id","customer_id","type","ts"(ISO, +05:30),"product_id","price_inr","session_id","device"}`
   - Types: `session_start view search add_to_cart remove_from_cart checkout_start order return points_earned points_redeemed coupon_redeemed`
+- **Customer profiles (`POST /api/customers`):** ID, signup date, city and tier, Prime flag, preferred payment
+  (COD/UPI/card), points balance, language.
+- **Product catalogue:** real Amazon items priced in ₹, with category margins.
+- **Business policy:** versioned YAML, edited in the Rules Studio or typed in plain English.
+- **Human feedback from Telegram:** quiz answers, Claim / Not for me / Why me? taps, free-text replies.
+
+**Outputs** (what OfferIQ sends back):
 - **Output: a Decision JSON** with:
   - `decision_id, customer_id, trigger`
   - `scores{churn_60d, uplift, clv_90d_inr, uplift_group, lifecycle}`
@@ -169,7 +181,13 @@ Amazon Reviews 2023 · UCI Retail · Hillstrom       React dashboard (Rules Stud
   - `ai{model, reason, attempts, tier}`
   - `rule_checks[{rule, passed, reason}]`
   - `status, channel, holdout`
-- **Conventions:**
+- **A Telegram offer card** delivered to the customer.
+- **A campaign CSV export** (`GET /api/campaigns/{id}/export.csv`), so a real platform can send the same offers
+  through its own e-mail, push or WhatsApp.
+- **Dashboard insights:** segments, Customer 360, decision log, experiment results, data realism.
+- **Measured impact:** extra revenue caused by offers, discount cost, ROI, Qini curve, holdout comparison.
+
+**Conventions:**
   - Money is integer ₹, formatted en-IN (₹1,49,999).
   - Time is IST. The DB stores naive IST wall-clock times; the API adds `+05:30` at the boundary.
 
@@ -334,18 +352,21 @@ items**, GMV ₹6,36,47,774, median order ₹1,099. Generated in about 40 s; loa
 
 ### 4.6 Database ([models/tables.py](../backend/app/models/tables.py), [db.py](../backend/app/db.py))
 
-SQLModel. SQLite locally (`backend/offeriq.db`, about 379 MB, git-ignored); Postgres (Neon) in the cloud.
+SQLModel. SQLite locally (`backend/offeriq.db`, git-ignored): about 379 MB after step 1 and about 394 MB after
+step 2. Postgres (Neon) in the cloud. The file can be opened with the free DB Browser for SQLite.
 
-Tables:
-- `customers`
-- `products`
-- `events`
-- `orders`
-- `order_items`
-- `sim_hidden_traits` (models must never read it)
-- `campaign_assignments`: past randomised campaigns (step 2)
-- `customer_scores`: one row of model scores per customer (step 2)
-- `model_runs`: the full report of each training run (step 2)
+| Table | Rows (after step 2) | Contents |
+|---|---|---|
+| `customers` | 5,000 | Name, city, tier, COD/UPI, Prime, language, points |
+| `products` | 15,145 | The real Amazon catalogue in ₹ |
+| `events` | 2,001,305 | Every visit, search, view, add-to-cart and order |
+| `orders` / `order_items` | 26,110 / 35,130 | Purchases, discounts, returns, RTO |
+| `campaign_assignments` | 12,469 | Who got which offer in the 3 past randomised campaigns (step 2) |
+| `customer_scores` | 5,000 | Model output per customer: churn, uplift, CLV, segment (step 2) |
+| `model_runs` | 1 per training run | The full report of each training run (step 2) |
+| `sim_hidden_traits` | 5,000 | The answer key; models must never read it |
+
+Row counts were reported in the main session at 19:16 IST.
 
 ### 4.7 Realism report ([realism.py](../backend/app/data/realism.py) → [calibration/realism_report.json](../calibration/realism_report.json))
 
@@ -374,7 +395,7 @@ The re-seed with three past campaigns (step 2) still passes 8/8: 2,001,305 event
   Claude batch pass will filter or flag items that don't fit India.
 - **The repeat-buyer rate** is the realism check closest to its limit (81% vs 71%).
 - **A few very heavy buyers** (up to about 74 orders a year): a long tail inherited from the real UCI data.
-- **The DB is 379 MB**, too big for Neon's free 0.5 GB tier once indexes are added. For the cloud: fewer customers,
+- **The DB is 379 MB (394 MB after step 2)**, too big for Neon's free 0.5 GB tier once indexes are added. Product views are most of it. For the cloud: fewer customers,
   or product views stored as aggregates (decided at deploy).
 - India-layer values are documented estimates, not measured data. That is why they sit in one editable file.
 
@@ -391,7 +412,9 @@ The re-seed with three past campaigns (step 2) still passes 8/8: 2,001,305 event
   - logs every update's type and chat ID only, never message text
   - quiets the `httpx` logger, which would otherwise print the token in URLs
   - has an error handler
-- **React + TypeScript dashboard shell** (Vite): a system-status page showing "API: ok".
+- **React + TypeScript dashboard shell** (Vite): a system-status page showing "API: ok", checked in the in-app
+  browser with both servers running. Tailwind and the real pages come in step 6.
+- The commit held 31 files; the staged diff was checked for secrets first, and `.env` was not among them.
 - **Tooling:**
   - uv-managed Python 3.12, pytest, ruff
   - `.env.example` with empty values
@@ -449,7 +472,13 @@ open cart value, points expiring, category spend mix, margin mix, and past campa
 | Segments | Uplift groups (relative thresholds) + lifecycle rules | [segments.py](../backend/app/analytics/segments.py) |
 
 Output: table `customer_scores` (one row per customer), table `model_runs` (full report per run), and
-[calibration/model_report.json](../calibration/model_report.json).
+[calibration/model_report.json](../calibration/model_report.json). It holds every number below, plus Qini curves and
+each campaign's results with confidence intervals. The [README](../README.md) has a models table, the measured
+offer effects and a "Weak spots" section.
+
+Build order inside the step: offer mechanics and past campaigns in the simulator → re-seed → features (about 30 s
+per snapshot) → churn, uplift, CLV, segments → `pipeline.py` and `train_models.py` → tuning against the answer key
+→ third campaign, re-seed and retrain (about 4 min together) → analytics unit tests → reason-text and CLV fixes.
 
 #### How the models were tested
 
@@ -524,7 +553,12 @@ order ₹2,444. Not yet backtested (does predicted 90-day value match what happe
 - **Sleeping dogs cannot be singled out.** Protect them with frequency caps and holdout groups, not the label.
 - **Uplift is short-term** (14-day purchase), not long-term retention; step 3 combines it with churn and CLV.
 - Churn is miscalibrated in the middle range (19% predicted vs 30% observed).
-- CLV has no backtest yet. Training takes ~5–6 min, fine nightly but too slow to re-run during a live demo.
+- CLV has no backtest yet. It is a statistical fit, not a trained prediction, so it has no held-out score; a backtest
+  (did predicted 90-day value come true?) is planned.
+- Training takes ~5–6 min, mostly the Hillstrom check and the feature snapshots. That's fine nightly but too slow to
+  re-run during a live demo.
+- The first step 2 summary to the user reported the ×1.69 headline but left out the per-offer weakness. Claude
+  corrected this when the user asked how the models were tested (19:47).
 
 ### Quality and safety so far
 
@@ -574,22 +608,29 @@ Limits on Claude itself: 8 s timeout, at most 6 tool calls, a circuit breaker, a
 
 T4–T6 use no AI, so the bot keeps working if the Claude API goes down during judging.
 
-**15 offer types:**
-- `PCT_OFF`
-- `FLAT_OFF`
-- `FREE_SHIPPING`
-- `BONUS_POINTS`
-- `UPI_CASHBACK` (moves COD customers to prepaid)
-- `BUNDLE`
-- `CART_NUDGE`
-- `POINTS_EXPIRY`
-- `EARLY_ACCESS`
-- `PRIME_TRIAL`
-- `WIN_BACK`
-- `SECOND_ORDER`
-- `REFERRAL`
-- `FESTIVE`
-- `NO_OFFER`
+**15 offer types** (templates the marketing team can switch on or off and set limits for):
+
+| Offer type | Parameters | Best for | Cost to the business |
+|---|---|---|---|
+| `PCT_OFF` | 5–40%, capped by category margin, max ₹ cap | Price-sensitive persuadables | High |
+| `FLAT_OFF` | ₹50–500 with a minimum order | Raising order value | Medium |
+| `FREE_SHIPPING` | Order threshold | At-risk customers, low-value carts | Low |
+| `BONUS_POINTS` | 2× or 5× points | Sure things and VIPs (reward without a discount) | Very low |
+| `UPI_CASHBACK` | ₹ back on prepaid | Moving COD customers to prepaid, which cuts RTO cost | Low; pays for itself |
+| `BUNDLE` | Buy across 2 categories, save X | Cross-selling | Medium |
+| `CART_NUDGE` | No discount: reminder or price-drop alert | Cart abandoners with low uplift | About zero |
+| `POINTS_EXPIRY` | "Use 1,240 points before 31 Oct" | Points holders | About zero (already a liability) |
+| `EARLY_ACCESS` | Sale preview | VIP and Prime | Zero |
+| `PRIME_TRIAL` | 30 days | Frequent non-Prime shoppers | Medium |
+| `WIN_BACK` | Larger, at most once per 90 days | Lapsed customers with high CLV | High |
+| `SECOND_ORDER` | ₹ off the 2nd order | New customers with 1 order | Medium |
+| `REFERRAL` | Give ₹100, get ₹100 | Happy, active customers | Medium |
+| `FESTIVE` | Diwali/Dhanteras, time-boxed | Everyone eligible in the festive window | Varies |
+| `NO_OFFER` | An explicit decision | Sleeping dogs, sure things | Zero |
+
+Each template defines allowed segments, value range, minimum order, validity days, a stacking flag, a budget pool, a
+cost formula and default message templates (English / Hinglish / Punjabi). Five of these types have already been
+tested in the past campaigns (nudge, 2× points, free shipping, 10% off, ₹100 off; §5 step 2).
 
 **Where Claude is used:**
 
@@ -625,14 +666,70 @@ Prompt caching is used for the policy and catalogue context.
 - Data Realism
 - Health
 - AI Analyst
+- Model scorecard (added after step 2: every model result, weak spots included)
 
-**Evaluation:**
-- policy simulation scored against the hidden ground truth (rules + AI vs blanket discounts), with Qini/AUUC
-- Hypothesis property tests: 10k cases, no sent offer ever breaks a rule
-- a misbehaving mocked Claude
-- about 40 red-team messages
-- canary customers
-- golden evals
+**Evaluation (does the engine make money?):** a policy simulation scored against the hidden ground truth. It compares
+no offers, 20% off to everyone, rules only, and rules + AI uplift on incremental profit, with Qini/AUUC. Target:
+rules + AI beats blanket discounting. A CLV backtest is also planned.
+
+**Build-time tests** (run on every commit; GitHub Actions runs them on push):
+1. Unit tests: rules engine, features, segments, ₹/IST formatting, generator.
+2. Property tests (Hypothesis): 10k random customer × offer × policy cases; any decision marked "sent" passes every rule.
+3. Contract tests: event and decision JSON schemas, OpenAPI responses.
+4. A mocked Claude that misbehaves on purpose (90% off, an offer not on the menu, wrong ₹ in the text, invalid JSON,
+   timeout, 429/500 errors); the test asserts the right layer and fallback tier catch each one.
+5. A red-team suite: about 40 prompt-injection and abuse messages in English, Hinglish and Punjabi.
+6. Realism tests (already built).
+7. Bot handler tests: /start, quiz, browse, Claim / Why / Stop.
+8. Frontend: Vitest components and a Playwright smoke test.
+
+**Real-time checks** (on the deployed system, shown on the Health page):
+- the L2–L5 validators on every real response, with each rejection logged
+- an independent re-checker of every *sent* offer (target: 0 mismatches)
+- about 12 **canary customers** every 10 minutes with known expected outcomes (e.g. sleeping dog → no offer;
+  opted out → nothing sent), shown as green/red tiles and optionally sent to the user's Telegram
+- about 30 golden scenarios against the real Claude, run with a button and scored per prompt version
+- shadow mode for new rules before they go live
+- live metrics: violations, fallback rate per tier, p95 latency, API errors, token spend, budget burn, claim rate
+
+**Extra features (prioritised):**
+- **Must:**
+  - kill switch (AI off)
+  - unique coupon codes with redemption tracking
+  - "Why me?" explanations
+  - Health page with canaries
+  - dashboard login, so the public can't edit rules on the deployed site
+  - editor for pre-approved message templates
+- **Should:**
+  - send at each customer's most active hour
+  - budget pacing across days
+  - a Thompson-sampling bandit that learns which message variant wins
+  - a fairness audit across city tier, gender and age
+  - a guard against training customers to only buy on discount
+  - COD → prepaid nudges
+  - a Diwali campaign planner
+  - a single-customer "what-if" simulator
+- **Stretch:**
+  - price-drop and back-in-stock triggers
+  - multi-tenant platform API keys
+  - weekly PDF report
+  - customer-journey replay
+  - WhatsApp-ready export
+
+**Build schedule** (from the approved plan; each step ends working, with a commit):
+
+| Step | Planned day | Scope | Status |
+|---|---|---|---|
+| 0 | Thu 22 | Skeleton, CLAUDE.md, README, bot replies to /start | ✅ Done |
+| 1 | Thu–Fri | Data ingest, calibration, generator, realism report | ✅ Done (Thu) |
+| 2 | Fri | Features, churn, uplift (validated on Hillstrom), CLV, segments | ✅ Done (Thu) |
+| 3 / 3b | Fri–Sat | Policy schema, rules engine, property tests; rules-only fallback (T4–T6) | Next, waiting on the user's decision |
+| 4 / 4b | Sat | Claude offer agent with guardrails and T1–T3, audit log; health checks | Planned |
+| 5 | Sat | Full Telegram flow (quiz → twin → offer card → feedback, holdout) | Planned |
+| 6 | Sat–Sun | React dashboard, API, live updates (SSE) | Planned |
+| 7 | Sun | Plain-English rule editing with dry run, campaigns, policy simulation, AI analyst, two-way chat | Planned |
+| 8 | Mon | Deploy (container host + Neon + Vercel), classmate test round, README, demo script | Planned |
+| — | Tue 27, before 12:00 | Buffer and submission | — |
 
 ## 7. How to reproduce everything
 
@@ -694,12 +791,33 @@ All times IST, Thu 22 Oct 2026.
   simulator, then the feature pipeline and churn model. Re-seeded with the campaigns (8/8 still pass).
 - **17:35, docs:** this documentation file is created, and the standing update rule is added to CLAUDE.md.
 - **17:40–19:05, main:** uplift (validated on Hillstrom), CLV, segments and the training script built; models tuned against the answer key; a third past campaign added and the DB re-seeded (8/8 realism still pass). 26 tests pass.
-- **19:10–19:45, main:** the user asks what the dataset is, whether models train on it, what churn/uplift/CLV mean, and how the models were tested. Claude explains, and flags that per-offer uplift is unreliable for 3 of 5 offer types (not mentioned in the first step 2 summary).
-- **19:55, main:** this log updated with step 2 and full test results; step 2 committed with only the main session's files; the docs session is messaged with the boundaries.
-- **20:05–20:10, main:** the user asks whether the docs session can document everything. Claude explains that it reads files, not chats. Added: a per-category data table (§4.1), the plain-English concepts (§1.1), and an export of the main chat's transcript under `docs/transcripts/` (git-ignored, for cross-checking only).
-- **~20:05, docs:** wording pass after step 2. Session roles, the database table list and the decisions table
-  updated; two ambiguous model results (sleeping-dog detection, persuadable threshold) reworded; the problems table
-  put in time order. No numbers changed.
+- **19:16–19:24, main:** the user says they feel left out and asks where the dataset is, whether models train on it,
+  and what churn, uplift, CLV and segments mean. Claude explains with customer C02588 (§1.1). The user then asks if
+  the idea is to give a leaving customer even a loss-making 60% discount; Claude answers with the profit table (§1.1).
+- **19:47, main:** the user asks how the models were tested and where the scores are recorded. Claude gives the
+  full results and corrects its earlier summary, which had left out the per-offer weakness. It proposes using
+  measured campaign effects to choose *which* offer (pending the user's decision).
+- **19:50–19:53, main:** the user asks how this docs chat can get the main chat's context without the two
+  interfering. Claude proposes files as the shared memory, plus file ownership per session; the user approves.
+- **19:54, main:** this log updated with step 2 and full test results; step 2 committed (`617c13f`) with only the
+  main session's files; the docs session is messaged with the boundaries.
+- **19:56, docs:** wording pass after step 2 (`26c0f57`). Session roles, the database table list and the decisions
+  table updated; two ambiguous model results (sleeping-dog detection, persuadable threshold) reworded; the problems
+  table put in time order. No numbers changed.
+- **19:57–20:00, main:** the user asks whether the docs session will capture every detail (Amazon counts, data
+  created, models, results, failures, fixes). Claude explains that the docs session reads files, not chats, and
+  lists the gaps; the user approves adding the per-category table, the concepts section and a transcript export.
+- **20:00–20:02, main:** per-category data table (§4.1) and plain-English concepts (§1.1) added (`ae3e815`); the main
+  chat's transcript exported to `docs/transcripts/` (git-ignored, for cross-checking only).
+- **~20:10, docs:** log cross-checked against the transcript and the approved plan. Added:
+  - five decisions: the user chose the sampling method and the 10 categories; Kaggle data not used; no-AI tiers
+    first; real-time checks were the user's request
+  - the full input/output contract
+  - database row counts and size after step 2
+  - the order of work inside step 2, and why CLV has no score yet
+  - the offer-type table, the full test plan, the extra features, a Model scorecard page and the build schedule
+  - timeline lines for 19:16–20:00
+  Times were corrected from git. No recorded numbers changed.
 
 ## 10. Open items and the user's to-dos
 
@@ -709,7 +827,11 @@ All times IST, Thu 22 Oct 2026.
       and `/setuserpic`.
 - [ ] Share https://t.me/Dilnazecom_bot with classmates, and recruit 3–5 testers by step 5.
 - [ ] Delete `backend/offeriq.db.stale` (378 MB leftover) when convenient.
-- [ ] Step 8: free container host, Neon and Vercel accounts; choose a dashboard password.
+- [ ] Step 8: free container host, Neon and Vercel accounts; choose a dashboard password. `WEBHOOK_URL` gets the
+      deployed backend's public address then (e.g. `…/api/telegram/webhook`), and `TELEGRAM_WEBHOOK_SECRET` is
+      generated; until then the bot polls from the laptop.
+- [ ] Later steps will ask for: checking the default margins and discount caps, the bot's voice and languages, and
+      3–5 classmate testers.
 - [ ] **Decide for step 3:** model picks *who* gets an offer, measured campaign effects pick *which* offer (proposed by Claude), or improve the per-offer models first.
 
 ## 11. Headline numbers (for the 2-page PDF)
