@@ -8,12 +8,14 @@
 > feature, dataset, decision or fix lands (rule in [CLAUDE.md](../CLAUDE.md), section "Documentation").
 > Each entry in the [timeline](#9-timeline) says which session did it.
 >
-> Last updated: **Thu 22 Oct 2026, ~19:55 IST**, after step 2 was committed (main build session).
+> Last updated: **Thu 22 Oct 2026, ~20:05 IST**, wording pass after step 2 (docs session). Step 2 facts were added
+> at 19:55 by the main build session.
 
 Sessions referred to below:
-- **Main build session**: the planning-and-build chat ("E-commerce analysis system"). It wrote the plan, step 0
-  and step 1, and is building step 2.
-- **Docs session**: the side chat that verified and committed step 1, made the progress PDF and keeps this log.
+- **Main build session**: the planning-and-build chat ("E-commerce analysis system"). It wrote the plan and
+  built steps 0–2. It owns the code and data, and adds each step's facts here in the same commit.
+- **Docs session**: the side chat that verified and committed step 1, made the progress PDF, created this log and
+  polishes its wording. It writes only in `docs/` (see CLAUDE.md, "Two sessions in this folder").
 
 ---
 
@@ -69,6 +71,10 @@ buy. It then:
 | Rescale purchase frequency to **7 orders/year** | Claude (step 1) | ~15:30 | UCI is a UK wholesaler-like retailer; Indian consumer e-commerce shops more often. Only the mean changes; the *shape* of variation stays from real data |
 | **Sample Amazon by HTTP range requests** instead of downloading the multi-GB files | Claude (step 1) | ~15:23 | Downloads stay at ~55 MB instead of tens of GB |
 | Offer effects learned only from **past randomised campaigns** in the simulated history | Claude (step 2) | ~17:20 | Real platforms learn uplift from their own A/B tests; models must never read the hidden traits |
+| Add a **third past campaign** (`CMP-MAR`) and use **small, regularised uplift trees** | Claude (step 2) | ~18:3x | Two campaigns gave too little data per offer type, and larger trees overfit when checked against the answer key |
+| **Report the models' weak spots openly** (per-offer uplift, sleeping dogs) | Claude flagged them; the user asked how the models were tested | 19:10–19:45 | Honest evaluation; the gaps change how step 3 chooses offers |
+| **Two sessions with separate file ownership**: build owns code and data, docs writes only in `docs/`, each stages only its own files | User (passed on by the main session) | 19:50 | Both sessions had committed in the same folder; this prevents one committing the other's work |
+| How step 3 chooses *which* offer | **Pending: the user decides** | — | See [§10](#10-open-items-and-the-users-to-dos) |
 
 The full approved plan is kept outside the repo at
 `C:\Users\HP\.claude\plans\d-desktop-hackathon-2-brief-pdf-https-g-abstract-pillow.md`. Its sections A–G and 1–12 are
@@ -248,12 +254,14 @@ Tables:
 - `orders`
 - `order_items`
 - `sim_hidden_traits` (models must never read it)
-- `campaign_assignments` (step 2, in progress)
+- `campaign_assignments`: past randomised campaigns (step 2)
+- `customer_scores`: one row of model scores per customer (step 2)
+- `model_runs`: the full report of each training run (step 2)
 
 ### 4.7 Realism report ([realism.py](../backend/app/data/realism.py) → [calibration/realism_report.json](../calibration/realism_report.json))
 
 Each check compares a synthetic statistic with its real counterpart. Gap shapes are compared after dividing by the
-mean, because the mean was deliberately rescaled for India.
+mean, because the mean was deliberately rescaled for India. The table shows the step 1 seed (commit `0cd2511`).
 
 | Check | Synthetic | Real / target | Distance ≤ limit | Result |
 |---|---|---|---|---|
@@ -405,15 +413,16 @@ purchases ×**1.24** (+0.40 pp vs +0.33 pp).
 |---|---|---|
 | Predicted vs true uplift (10% off), Spearman | 0.17 | Weak but positive: much of each person's response is individual variation no data reveals |
 | Churn score vs truly churned, Spearman | 0.37 | Clear positive link |
-| Sleeping dogs found | 2.5% found; flagged ones 6% correct | ❌ No better than chance with three campaigns |
+| Sleeping dogs found | Only 2.5% of the true sleeping dogs were flagged, and only 6% of flagged customers really were one | ❌ No better than chance (about 6% of all customers are sleeping dogs) |
 
 **CLV**: BG/NBD on the platform's orders gives r = 0.55, α = 14.8, a = 2.02, b = 286 (converged); population average
 order ₹2,444. Not yet backtested (does predicted 90-day value match what happened?), so planned.
 
 **Segments today**:
 - Uplift group: persuadable 2,000 · lost cause 2,659 · sure thing 229 · sleeping dog 112.
-- Thresholds: persuadable means top 40% by best-offer uplift and ≥ +8.7 pp; sure thing means the top 20% of
-  baseline buyers (≥ 40% chance in 14 days).
+- Thresholds: persuadable means the top 40% by best-offer uplift, with a floor of +3 pp (in this run the top-40%
+  cutoff came out at +8.7 pp); sure thing means the top 20% of baseline buyers (≥ 40% chance in 14 days);
+  sleeping dog means even the best offer is estimated at −3 pp or worse.
 - Lifecycle: lapsed 1,803 · active 1,655 · bargain hunter 405 · at risk 382 · new 324 · VIP 323 · window shopper 108.
 
 #### Weak spots and what they mean for step 3 (be honest about these in the submission)
@@ -562,6 +571,7 @@ cd ../frontend && npm install && npm run dev                # dashboard → http
 | 15:39 / 16:5x | The Windows console (cp1252) crashed printing "≤" and "→" | The scripts switch stdout to UTF-8 |
 | 16:55 | The generator test failed with `KeyError: 'customers'`: the test never loaded the table definitions | The test now imports `app.models` (docs session) |
 | 16:58 | The 1.94M-event DB load failed with "database is locked" on a 378 MB leftover DB from an earlier partial run | The old file was moved to `offeriq.db.stale` (not deleted) and a fresh one seeded. `*.db.stale` and SQLite side files are now git-ignored |
+| 17:00 | Two copies each of the API server and the bot were left running | Still open: Telegram allows only one polling bot per token, so stop the extra copies |
 | 18:1x | Ground-truth check crashed: SQLite returns booleans as 0/1, so boolean indexing failed | Cast to `bool` after loading |
 | 18:2x | First uplift run put 80% of customers in "persuadable"; flagged sleeping dogs were no better than chance | Persuadable became relative (top 40% and ≥ +3 pp); sleeping-dog threshold tightened to −3 pp |
 | 18:3x | Uplift trees overfit (holdout ×2.1, ground-truth Spearman 0.05) | Compared three model sizes against the answer key; switched to small, regularised trees (×2.5, Spearman 0.14) and added a third past campaign |
@@ -569,7 +579,6 @@ cd ../frontend && npm install && npm run dev                # dashboard → http
 | 18:5x | Hillstrom conversions (0.5% rate) underfit with the small trees (×0.87) | Larger trees for the 64k-row Hillstrom data (×1.24) |
 | 19:0x | CLV was `NaN` for never-bought customers; reason text said "Only 0 visits" | Prior purchase rate for never-bought; reason text rewritten ("No visits in the last 30 days") |
 | 19:50 | Both sessions committed in the same folder; the main session had been staging with `git add -A` | Each session now stages only its own files by name (see CLAUDE.md, "Two sessions") |
-| 17:00 | Two copies each of the API server and the bot were left running | Still open: Telegram allows only one polling bot per token, so stop the extra copies |
 
 ## 9. Timeline
 
@@ -598,6 +607,9 @@ All times IST, Thu 22 Oct 2026.
 - **17:40–19:05, main:** uplift (validated on Hillstrom), CLV, segments and the training script built; models tuned against the answer key; a third past campaign added and the DB re-seeded (8/8 realism still pass). 26 tests pass.
 - **19:10–19:45, main:** the user asks what the dataset is, whether models train on it, what churn/uplift/CLV mean, and how the models were tested. Claude explains, and flags that per-offer uplift is unreliable for 3 of 5 offer types (not mentioned in the first step 2 summary).
 - **19:55, main:** this log updated with step 2 and full test results; step 2 committed with only the main session's files; the docs session is messaged with the boundaries.
+- **~20:05, docs:** wording pass after step 2. Session roles, the database table list and the decisions table
+  updated; two ambiguous model results (sleeping-dog detection, persuadable threshold) reworded; the problems table
+  put in time order. No numbers changed.
 
 ## 10. Open items and the user's to-dos
 
