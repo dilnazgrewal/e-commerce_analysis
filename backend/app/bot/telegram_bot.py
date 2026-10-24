@@ -182,12 +182,7 @@ async def send_offer(
         await context.bot.send_message(user.chat_id, text, parse_mode=HTML, reply_markup=markup)
     elif decision.status == "queued":
         when = next_morning(now, s.policy)
-        context.job_queue.run_once(
-            queued_job,
-            when=(when - now).total_seconds(),
-            data={"chat_id": user.chat_id, "trigger": trigger},
-            name=f"queued:{user.chat_id}",
-        )
+        schedule_queued(context.job_queue, user.chat_id, trigger, [decision.decision_id], when, now)
         await context.bot.send_message(
             user.chat_id,
             f"🌙 It's quiet hours (no offers 9 pm–9 am). Your offer will "
@@ -212,11 +207,45 @@ def offer_photo(s: Services, user: BotUser, d: dict) -> str | None:
     return items[0]["image_url"] if items else None
 
 
+def schedule_queued(job_queue, chat_id: int, trigger: str, decision_ids: list[str], when, now) -> None:
+    """Re-decide a queued offer once quiet hours end (or right away, if they already have)."""
+    job_queue.run_once(
+        queued_job,
+        when=max((when - now).total_seconds(), 5),
+        data={"chat_id": chat_id, "trigger": trigger, "decision_ids": decision_ids},
+        name=f"queued:{chat_id}",
+    )
+
+
 async def queued_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     data = context.job.data
-    user = await asyncio.to_thread(store.get_user, svc(context).engine, data["chat_id"])
+    engine = svc(context).engine
+    # The queued decision has now been acted on, so a later restart won't schedule it again.
+    for decision_id in data.get("decision_ids", []):
+        await asyncio.to_thread(store.set_status, engine, decision_id, "released")
+    user = await asyncio.to_thread(store.get_user, engine, data["chat_id"])
     if user and user.twin_customer_id and not user.opted_out:
         await send_offer(context, user, f"{data['trigger']}:after_quiet_hours", None, explain_empty=True)
+
+
+async def resume_queued(application: Application) -> None:
+    """Restarts must never lose an offer: re-schedule queued decisions from the log (jobs live in memory)."""
+    s: Services = application.bot_data.get("svc")
+    if s is None:
+        return
+    now = ist_now()
+    pending = await asyncio.to_thread(store.pending_queued, s.engine, now)
+    for item in pending:
+        schedule_queued(
+            application.job_queue,
+            item["chat_id"],
+            item["trigger"],
+            item["decision_ids"],
+            next_morning(now, s.policy) if s.policy.contact.quiet_hours.contains(now.time()) else now,
+            now,
+        )
+    if pending:
+        log.info("Re-scheduled %d queued offer(s) from the log", len(pending))
 
 
 async def cart_job(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -461,6 +490,7 @@ async def announce(application: Application) -> None:
     )
     me = await application.bot.get_me()
     log.info("Bot is live: https://t.me/%s, send it /start", me.username)
+    await resume_queued(application)
 
 
 def build_application(token: str, services: Services | None = None) -> Application:

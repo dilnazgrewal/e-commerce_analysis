@@ -8,7 +8,7 @@
 > feature, dataset, decision or fix lands (rule in [CLAUDE.md](../CLAUDE.md), section "Documentation").
 > Each entry in the [timeline](#9-timeline) says which session did it.
 >
-> Last updated: **Thu 22 Oct 2026, ~22:05 IST**: step 5 entries checked against the code (docs session).
+> Last updated: **Sat 24 Oct 2026, ~08:50 IST**, after queued offers were made to survive bot restarts (main build session).
 > Step 5 facts were added at 21:54 by the main build session.
 
 Sessions referred to below:
@@ -792,7 +792,9 @@ added to the existing database without losing data (`store.ensure_schema`).
 8. **/offer** asks for an offer now (trigger `requested`). **/history** lists recent offers and their status.
    **/stop** opts out: the twin's `opted_out` is set, so the rules block every offer. **/resume** reverses it.
 9. **Quiet hours** (21:00–09:00 IST): the decision is logged as `queued`, the classmate is told when it will
-   arrive, and a job re-decides at 09:00.
+   arrive, and a job re-decides at 09:00. Jobs live in memory, so on every start the bot re-schedules queued
+   decisions from the last 24 h that no job has released yet (`store.pending_queued`, `resume_queued`). When the
+   job runs, it marks them `released` so a later restart doesn't schedule them twice (added 24 Oct, 08:45).
 10. **Live holdout:** 10% of chats get a logged `holdout` decision and never an offer (no Claude call). Comparing
     their claim and order rates with everyone else's measures real lift.
 
@@ -839,7 +841,7 @@ added to the existing database without losing data (`store.ensure_schema`).
 
 ### Quality and safety so far
 
-- **213 tests pass** (after the step 5 commit; ~1.5–3.5 min), and ruff lint is clean. The tests cover:
+- **214 tests pass** (after the 24 Oct restart fix; ~1.5–3.5 min), and ruff lint is clean. The tests cover:
   - bot handlers
   - the health endpoint
   - BG/NBD parameter recovery
@@ -1075,6 +1077,8 @@ cd ../frontend && npm install && npm run dev                # dashboard → http
 | 21:4x | A repeated trigger still called Claude before being recognised as a duplicate | The idempotency key is checked before deciding; L5 still checks it again inside the transaction |
 | 21:48 | Smoke test: the first twin was a "sure thing" with negative uplift, so the rules correctly sent nothing, but a classmate matched like that would never see an offer | Twin matching prefers offer-responsive twins among similar matches (§2) |
 | 21:4x | Test bot user set to Punjabi while the fake Claude writes English; the language check (correctly) rejected the messages | Test user set to English |
+| 22 Oct 22:xx / 23 Oct 21:xx | The background bot process stopped twice when the build session ended (exit code 4, no error logged); offers queued for 09:00 would have been lost because jobs live in memory | The bot is restarted at the start of each working session. On startup it re-schedules unreleased queued decisions from the log; a test simulates a restart (24 Oct 08:45) |
+| 23 Oct 21:3x | After a reboot, the bot printed nothing for over a minute and looked hung | Not a hang: importing the Anthropic SDK, pandas and SQLAlchemy took ~25 s on a cold disk cache. The next start took ~10 s |
 
 ## 9. Timeline
 
@@ -1153,6 +1157,9 @@ All times IST, Thu 22 Oct 2026.
 - **21:35–21:50, main:** bot tables and store (L5), twin matching, service, cards, all handlers and jobs; 14 bot tests. A smoke test on a database copy with real Claude found the "sure thing" twin problem; matching fixed.
 - **21:51, main:** the old step 0 bot process stopped; the new bot started (polling) and the real database migrated (new tables and columns, no data lost). 213 tests pass.
 - **21:54, main:** step 5 committed (`93da412`).
+- **23 Oct ~21:34, main:** the bot had stopped overnight (the session ended); restarted at 21:38. The user was given a step-by-step phone test script; quiet hours meant offers would queue until 09:00.
+- **24 Oct 08:13, main:** the user is back; the bot is restarted. Nobody had used it overnight (no bot users or decisions in the log).
+- **24 Oct 08:40–08:50, main:** at the user's request, queued offers now survive restarts (re-scheduled from the log on startup). 1 new test; the bot restarted with the fix.
 - **~22:05, docs:** step 5 entries checked against the code, and all match:
   - 213 tests
   - the twin-matching weights
@@ -1205,6 +1212,6 @@ All times IST, Thu 22 Oct 2026.
 | Live AI decisions (20 customers) | 9 accepted first time, 1 fixed on retry, 0 failed calls; median 3.0 s per call; ~US $0.01 per decision; messages in EN / Hinglish / Punjabi |
 | Prompt-injection defence | Guard flags 37/40 attacks (0/10 false alarms); with a Claude that obeys every attack, 80/80 still sent nothing that breaks a rule |
 | Telegram flow | 5-tap quiz → digital twin from 5,000 customers → browse real products → abandoned-cart offer by Claude, checked by the rules and re-checked at send time → Claim / Not for me / Why me?; 10% live holdout by chat |
-| Tests | 213 passing; lint clean |
+| Tests | 214 passing; lint clean |
 | Bot | @Dilnazecom_bot, live in polling mode |
 | Safety design | 7 guardrail layers, 6-tier fallback (3 tiers without AI), models blocked from ground truth |

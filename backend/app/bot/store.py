@@ -262,6 +262,28 @@ def persist(
     return decision
 
 
+def pending_queued(engine: Engine, now: datetime, max_age_hours: int = 24) -> list[dict]:
+    """Queued Telegram decisions from the last day that no job has released yet, grouped per chat."""
+    frame = pd.read_sql(
+        text(
+            "SELECT d.decision_id, d.trigger, b.chat_id FROM offer_decisions d "
+            "JOIN bot_users b ON b.twin_customer_id = d.customer_id "
+            "WHERE d.status = 'queued' AND d.channel = 'telegram' AND d.created_at >= :since "
+            "ORDER BY d.created_at"
+        ),
+        engine,
+        params={"since": now - timedelta(hours=max_age_hours)},
+    )
+    return [
+        {
+            "chat_id": int(chat_id),
+            "trigger": group["trigger"].iloc[-1],
+            "decision_ids": group["decision_id"].tolist(),
+        }
+        for chat_id, group in frame.groupby("chat_id")
+    ]
+
+
 def get_decision(engine: Engine, decision_id: str) -> dict | None:
     frame = pd.read_sql(
         text("SELECT * FROM offer_decisions WHERE decision_id = :d"), engine, params={"d": decision_id}

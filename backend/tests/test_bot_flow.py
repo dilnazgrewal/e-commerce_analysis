@@ -247,3 +247,38 @@ def test_cards_fit_telegram_limits(engine):
 def test_quiet_hours_end_is_next_morning():
     assert next_morning(datetime(2026, 10, 22, 22, 0), POLICY) == datetime(2026, 10, 23, 9, 0)
     assert next_morning(datetime(2026, 10, 23, 2, 0), POLICY) == datetime(2026, 10, 23, 9, 0)
+
+
+@pytest.mark.asyncio
+async def test_queued_offers_survive_a_restart(engine, monkeypatch):
+    from types import SimpleNamespace
+
+    from app.bot import telegram_bot
+
+    cid = contactable_ids(1)[0]
+    store.save_user(engine, bot_user(twin_id=cid))
+    store.bind_twin(engine, 111, cid, "en")
+    night = datetime(2026, 10, 23, 22, 30)
+    d = offer_for(services(engine, sonnet=FakeLLM()), store.get_user(engine, 111), "requested", night)
+    assert d.status == "queued"  # quiet hours: logged, no Claude call
+
+    # "restart": a fresh application finds the queued decision in the log and schedules it for 09:00
+    scheduled = []
+    jobs = SimpleNamespace(run_once=lambda cb, when, data, name: scheduled.append((cb, when, data)))
+    app = SimpleNamespace(bot_data={"svc": services(engine)}, job_queue=jobs)
+    monkeypatch.setattr(telegram_bot, "ist_now", lambda: night)
+    await telegram_bot.resume_queued(app)
+    assert len(scheduled) == 1
+    callback, delay, data = scheduled[0]
+    assert (
+        callback is telegram_bot.queued_job
+        and data["chat_id"] == 111
+        and data["decision_ids"] == [d.decision_id]
+    )
+    assert delay == pytest.approx((datetime(2026, 10, 24, 9, 0) - night).total_seconds())
+
+    # once the job has released it, another restart doesn't schedule it again
+    store.set_status(engine, d.decision_id, "released")
+    scheduled.clear()
+    await telegram_bot.resume_queued(app)
+    assert scheduled == []
