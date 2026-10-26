@@ -63,6 +63,7 @@ ASSIGNMENT_COLUMNS = [
     "valid_until",
 ]
 SHIPPING_FEE_INR = 40
+DISCOUNT_TYPES = {"PCT_OFF", "FLAT_OFF", "WIN_BACK", "SECOND_ORDER", "UPI_CASHBACK"}
 FREE_SHIPPING_THRESHOLD_INR = 499
 RETURN_REASONS = [
     "size/fit issue",
@@ -87,6 +88,8 @@ class SimState:
     orders: list = field(default_factory=list)
     items: list = field(default_factory=list)
     assignments: list = field(default_factory=list)
+    # Policy Lab sensitivity: scales the true effect of "discount" or "reward" offers (1.0 = as calibrated)
+    effect_scale: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         c = self.population.customers
@@ -181,6 +184,9 @@ def apply_offer(
     effect = offer_effect(
         offer_type, value, state.price_sens[customer_idx], state.responsiveness[customer_idx]
     )
+    if effect > 0:
+        group = "discount" if offer_type in DISCOUNT_TYPES else "reward"
+        effect *= state.effect_scale.get(group, 1.0)
     state.offer_boost[customer_idx] = effect
     state.offer_until[customer_idx] = (day + timedelta(days=valid_days - 1)).toordinal()
     state.offer_spec[customer_idx] = {"type": offer_type, "value": value, "code": code}
@@ -351,7 +357,7 @@ def _redeem(spec: dict, gross: int, payment: str) -> tuple[int, str | None, int]
     kind, value, code = spec["type"], spec["value"], spec["code"]
     if kind in ("PCT_OFF", "WIN_BACK"):
         return int(round(gross * value / 100)), code, 1
-    if kind == "FLAT_OFF":
+    if kind in ("FLAT_OFF", "SECOND_ORDER"):
         return (int(value), code, 1) if gross >= 2 * value else (0, None, 1)
     if kind == "FREE_SHIPPING":
         return (SHIPPING_FEE_INR, code, 1) if gross < FREE_SHIPPING_THRESHOLD_INR else (0, code, 1)

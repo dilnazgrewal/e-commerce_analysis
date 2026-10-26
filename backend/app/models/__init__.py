@@ -7,6 +7,7 @@ from app.models.tables import (
     OfferDecision,
     Order,
     OrderItem,
+    PolicyVersion,
     Product,
     SimHiddenTrait,
 )
@@ -20,6 +21,7 @@ __all__ = [
     "OfferDecision",
     "Order",
     "OrderItem",
+    "PolicyVersion",
     "Product",
     "SimHiddenTrait",
 ]

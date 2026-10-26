@@ -1,46 +1,134 @@
 import { useEffect, useState } from 'react'
+import { api, ApiError, getToken, setToken } from './api'
+import Decisions from './pages/Decisions'
+import Evidence from './pages/Evidence'
+import Lab from './pages/Lab'
+import Overview from './pages/Overview'
+import Rules from './pages/Rules'
 
-type Health = {
-  status: string
-  version: string
-  env: string
-  integrations: { telegram: boolean; claude: boolean }
+const PAGES = [
+  { id: 'overview', label: 'Overview', Page: Overview },
+  { id: 'lab', label: 'Policy Lab', Page: Lab },
+  { id: 'rules', label: 'Rules Studio', Page: Rules },
+  { id: 'evidence', label: 'Evidence', Page: Evidence },
+  { id: 'decisions', label: 'Decision log', Page: Decisions },
+]
+
+function useHashPage() {
+  const read = () => window.location.hash.replace('#/', '') || 'overview'
+  const [page, setPage] = useState(read)
+  useEffect(() => {
+    const on = () => setPage(read())
+    window.addEventListener('hashchange', on)
+    return () => window.removeEventListener('hashchange', on)
+  }, [])
+  return page
 }
 
-function App() {
-  const [health, setHealth] = useState<Health | null>(null)
-  const [error, setError] = useState(false)
+export default function App() {
+  const page = useHashPage()
+  const [authed, setAuthed] = useState<boolean | null>(null)
+  const [loginRequired, setLoginRequired] = useState(true)
 
   useEffect(() => {
-    fetch('/api/health')
-      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
-      .then(setHealth)
-      .catch(() => setError(true))
+    api<{ login_required: boolean }>('/api/session')
+      .then((s) => {
+        setLoginRequired(s.login_required)
+        setAuthed(true)
+      })
+      .catch(() => setAuthed(false))
+    const out = () => setAuthed(false)
+    window.addEventListener('offeriq-logout', out)
+    return () => window.removeEventListener('offeriq-logout', out)
   }, [])
 
-  return (
-    <main className="shell">
-      <h1>OfferIQ</h1>
-      <p className="tagline">Which offer, for whom, and why. Every AI choice is checked against your rules.</p>
+  if (authed === null) return <div className="login muted">Loading…</div>
+  if (!authed) return <Login onDone={() => setAuthed(true)} />
 
-      <section className="card">
-        <h2>System status</h2>
-        {error && <p className="bad">Backend not reachable. Start it with <code>uv run uvicorn app.main:app</code>.</p>}
-        {!error && !health && <p>Checking…</p>}
-        {health && (
-          <ul>
-            <li>API: <span className="good">{health.status}</span> (v{health.version}, {health.env})</li>
-            <li>Telegram bot: <Flag on={health.integrations.telegram} /></li>
-            <li>Claude API: <Flag on={health.integrations.claude} /></li>
-          </ul>
-        )}
-      </section>
-    </main>
+  const current = PAGES.find((p) => p.id === page) ?? PAGES[0]
+  return (
+    <div className="app">
+      <aside className="side">
+        <div className="brand">
+          Offer<span>IQ</span>
+        </div>
+        <div className="brand-sub">Who gets which offer, and why</div>
+        <nav className="nav">
+          {PAGES.map((p) => (
+            <a key={p.id} href={`#/${p.id}`} className={p.id === current.id ? 'on' : ''}>
+              {p.label}
+            </a>
+          ))}
+        </nav>
+        <div className="side-foot">
+          Synthetic customers only. Bot:{' '}
+          <a href="https://t.me/Dilnazecom_bot" target="_blank" rel="noreferrer">
+            @Dilnazecom_bot
+          </a>
+          {loginRequired && getToken() && (
+            <p>
+              <button
+                className="btn small"
+                onClick={() => {
+                  setToken('')
+                  setAuthed(false)
+                }}
+              >
+                Sign out
+              </button>
+            </p>
+          )}
+        </div>
+      </aside>
+      <main className="main">
+        <current.Page />
+      </main>
+    </div>
   )
 }
 
-function Flag({ on }: { on: boolean }) {
-  return on ? <span className="good">configured</span> : <span className="bad">not configured</span>
+function Login({ onDone }: { onDone: () => void }) {
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setBusy(true)
+    setError('')
+    try {
+      const r = await api<{ token: string }>('/api/login', { password })
+      setToken(r.token)
+      onDone()
+    } catch (err) {
+      setError(err instanceof ApiError && err.status === 401 ? 'Wrong password.' : 'Could not reach OfferIQ.')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="login">
+      <form className="card stack" onSubmit={submit}>
+        <div>
+          <div className="brand" style={{ padding: 0 }}>
+            Offer<span>IQ</span>
+          </div>
+          <p className="sub" style={{ marginTop: 6 }}>
+            Marketing dashboard. Sign in to see decisions, test strategies and edit the offer rules.
+          </p>
+        </div>
+        <input
+          className="input"
+          type="password"
+          placeholder="Dashboard password"
+          value={password}
+          autoFocus
+          onChange={(e) => setPassword(e.target.value)}
+        />
+        {error && <div className="msg bad">{error}</div>}
+        <button className="btn primary" disabled={busy || !password}>
+          {busy ? 'Signing in…' : 'Sign in'}
+        </button>
+      </form>
+    </div>
+  )
 }
-
-export default App

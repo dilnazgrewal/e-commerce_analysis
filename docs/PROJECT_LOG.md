@@ -8,7 +8,8 @@
 > feature, dataset, decision or fix lands (rule in [CLAUDE.md](../CLAUDE.md), section "Documentation").
 > Each entry in the [timeline](#9-timeline) says which session did it.
 >
-> Last updated: **Mon 26 Oct 2026, ~11:30 IST**, after the database was copied to Neon (main build session).
+> Last updated: **Mon 26 Oct 2026, ~15:30 IST**, after the Policy Lab, Rules Studio and dashboard landed (main
+> build session).
 > Step 5 facts were added at 21:54 by the main build session.
 
 Sessions referred to below:
@@ -156,6 +157,12 @@ CLV, so the profit maths reflects long-term value.
 | **Cloud database is slimmed**: everything except browsing events older than 14 days | Claude | 26 Oct ~09:45 | Serving only needs recent activity; this keeps it far below Neon's 0.5 GB. Training stays local |
 | **Render region Ohio**, not Singapore | Claude | 26 Oct ~11:00 | The user's Neon project was created in AWS us-east-2 (Ohio); putting the service next to the database avoids a cross-continent round trip on every query |
 | **All timestamp columns are naive** (`NaiveDatetime`), and Telegram chat IDs are **BIGINT** | Claude | 26 Oct ~11:10 | SQLModel maps `datetime` to a timezone-aware column, which contradicts the project's naive-IST convention; real chat IDs exceed 32-bit integers. SQLite had hidden both |
+| **Policy Lab uses expected values, not dice** | Claude | 26 Oct ~13:30 | One random simulator run is dominated by luck (a single ₹1.6 lakh electronics order swings a strategy's profit). The Lab computes each customer's expected orders, margin and coupon cost from the simulator's own equations instead: exact, and ~1 s for 5,000 customers once offers are chosen. A dice-rolling cross-check stays in the tests |
+| **The Lab may read the hidden traits** (`experiments/policy_lab.py` is on the allow-list) | Claude, within rule 4 | 26 Oct ~13:30 | Scoring policies against ground truth is exactly what rule 4 permits. The strategies themselves only see what a platform sees (scores, profiles, rules); the test that blocks every other module still runs |
+| **Sensitivity sliders** for how strongly discounts and non-discount rewards work (0.25×–3×) | Claude, from the 26 Oct critique the user agreed to | 26 Oct ~13:45 | Offer-type strengths are a simulator assumption calibrated on Hillstrom's overall effect; the sliders show whether the conclusion survives if that assumption is wrong |
+| **Policies are versioned and append-only** (`policy_versions` table); the bot reads the newest version | Claude | 26 Oct ~14:00 | Every decision's `policy_version` can be traced to the exact rules it was checked against, and a marketer's edit reaches the bot within 15 s without a redeploy |
+| **Claude Opus proposes, a person publishes**: plain-English edits return a complete policy that is schema-checked (one retry with the errors), diffed, margin-checked and dry-run; nothing goes live without the Approve click | Plan (user-approved) + CLAUDE.md rule 7; implementation by Claude | 26 Oct ~14:10 | Claude never changes rules by itself. Version, author and date are always set by the system, whatever Claude returns |
+| **Dashboard login** with `DASHBOARD_PASSWORD`; every dashboard API needs the token | Plan (user chose the password) | 26 Oct ~14:00 | The deployed site is public; the decision log contains testers' first names in messages. The token is an HMAC of the password, so changing the password signs everyone out |
 
 The full approved plan is kept outside the repo at
 `C:\Users\HP\.claude\plans\d-desktop-hackathon-2-brief-pdf-https-g-abstract-pillow.md`. Its sections A–G and 1–12 are
@@ -844,6 +851,91 @@ added to the existing database without losing data (`store.ensure_schema`).
 - **Some products are odd.** The catalogue is from US Amazon, so a few products shown are unusual for India.
 - **Twin-matching bias.** Among similar twins, the matching prefers ones that respond to offers (see §2).
 
+### Steps 6–7 (part): dashboard, Policy Lab and Rules Studio (main build session, 26 Oct 12:45–15:30 IST)
+
+**Policy Lab** ([experiments/policy_lab.py](../backend/app/experiments/policy_lab.py)): tests a strategy on all
+5,000 simulated customers before anyone real sees it, against the simulator's ground truth.
+- Strategies: no offers (baseline), 20% off for everyone, 15% off for customers with churn ≥ 0.6, and OfferIQ
+  (the rules-only engine, T4/T5, decided at 11:00 on the scoring date 2026-10-22).
+- Procedure: for every customer, expected orders over the window = Poisson rate λ × festive and weekday demand; while
+  an offer is valid the rate is λ × (1 + its true effect) until the first order (the coupon is used then), after that
+  λ again. Lapsed customers can be won back with probability min(0.25, 0.1 × effect), as in the simulator. Coupon
+  cost uses the same redemption rules as the simulator (e.g. ₹ off needs an order ≥ 2 × the value; free delivery
+  saves ₹40 under ₹499). Order value and margin come from each customer's category tastes × popularity-weighted real
+  catalogue prices × the category margin in `india.yaml`. "Wasted" = coupon cost on orders that would have happened
+  anyway. Message cost ₹0.5 per offer.
+- Validated against the dice-rolling simulator (same customers, offers applied with `apply_offer`): expected orders
+  none 1,442.0 vs simulated 1,420.8; blanket 20% 1,819.9 vs 1,814.0; OfferIQ 1,541.9 vs 1,519.5 (within ~1.5%).
+  The first version overestimated blanket orders by ~10% because it kept the boost after the coupon was used; fixed.
+- **Result (5,000 customers, 14 days from 22 Oct, calibrated strengths 1×):**
+
+  | Strategy | Offers sent | Extra orders | Offer cost | Wasted on people who'd buy anyway | Extra profit | Return per ₹1 |
+  |---|---|---|---|---|---|---|
+  | 20% off for everyone | 5,000 | +377.9 | ₹3,83,354 | ₹2,22,641 | **−₹1,81,079** | ₹0.53 |
+  | 15% off at-risk (churn ≥ 0.6) | 2,299 | +93.7 | ₹38,662 | ₹11,784 | +₹10,465 | ₹1.27 |
+  | **OfferIQ** | 3,608 | +99.9 | ₹9,832 | ₹5,887 | **+₹44,073** | **₹5.48** |
+
+  Extra revenue: blanket ₹9,46,819, at-risk ₹2,40,584, OfferIQ ₹2,48,755. OfferIQ's mix: 1,633 cart reminders, 1,378 bonus
+  points, 479 free delivery, 74 ₹ off, 20 win-back, 19 second-order, 5 % off. It earns less revenue than blanket
+  discounting but far more profit, because almost all of its offers cost little or nothing.
+- **Sensitivity (honest finding):** at 2× discount strength the ordering stays (OfferIQ +₹45,641 vs blanket
+  −₹1,50,743, after the fix). Before the fix, a run at 2× showed blanket ahead; after correcting the boost, blanket
+  stays negative at 2×. The sliders are on the Lab page so judges can try it.
+- **Fairness audit** of OfferIQ's offers (offer rate by group; gender and age are never targeting inputs): max gap
+  3.6 pp across city tiers, 1.6 pp across genders, 4.3 pp across age bands.
+- Speed: choosing OfferIQ's offers for 5,000 customers takes ~13 s locally; the choices are cached per policy, so
+  moving a slider takes ~0.7 s. On Render's 0.1-CPU free plan the Lab uses a sample (`OFFERIQ_LAB_SAMPLE`, set to
+  1,500 in `render.yaml`).
+- Simulator change: `SimState.effect_scale` scales positive offer effects by group ("discount" = % off, ₹ off,
+  win-back, 2nd order, UPI cashback; "reward" = the rest); `SECOND_ORDER` coupons now redeem like ₹ off.
+
+**Versioned policies** ([rules/policy_store.py](../backend/app/rules/policy_store.py), table `policy_versions`):
+append-only versions; `active()` returns the newest (cached 15 s) or the default YAML; `publish()` validates and sets
+version, author and date itself; `diff()` lists changed values by path (offers by id, e.g.
+`offers[points2x].value.max`). The bot's `Services.policy` now reads the live version, so a published edit applies
+to the next offer.
+
+**Claude rule author** ([agent/rule_author.py](../backend/app/agent/rule_author.py)): `claude-opus-5-5`, effort
+medium, structured JSON output (`understood`, `summary`, `policy_json`, `warnings`), server-side refusal fallback,
+120 s timeout, the request inside `<request>` tags, category margins and the full current policy as context. Invalid
+output gets one retry with the exact schema errors. **Live test** (26 Oct ~14:30): "Diwali week: allow up to 40% off
+on electronics, VIPs get free delivery instead of points as their fallback, no messages after 8 pm" → valid first
+time in 34 s (~4.0k tokens). Claude refused the unsafe part: it raised the festive electronics cap only to 7.9%
+("not the 40% requested, because Electronics margin is only 8%"), changed the VIP fallback and moved quiet hours to
+20:00. Nothing was published.
+
+**Dashboard API** ([api/dashboard.py](../backend/app/api/dashboard.py)): `/api/login`, `/api/session`,
+`/api/overview` (decisions by status, tier, channel and offer type; sent offers that failed a rule (0); expected cost
+and profit; per-day series; bot users, holdout, taps), `/api/decisions` (+ `/{id}` with every rule check, AI calls
+and the person's taps), `/api/lab/compare`, `/api/policy` (+ `/check`, `/dry-run`, `/publish`, `/ai-edit`) and
+`/api/evidence` (model and realism reports, live bot counts). One Lab run at a time (lock).
+
+**React dashboard** ([frontend/src/](../frontend/src/)): Vite + React 19 + TypeScript + Recharts 3.10, hash routes,
+light and dark themes from the validated reference chart palette, login screen.
+- **Overview**: KPI tiles, decisions per day by status (stacked), which tier decided the sent offers, offer types;
+  refreshes every 15 s.
+- **Policy Lab**: three sliders (discount strength, reward strength, days), headline sentence, extra-profit chart,
+  OfferIQ's offer mix, the full strategy table and the fairness audit.
+- **Rules Studio**: plain-English box (Claude Opus) with examples; a form for category caps (margin shown next to
+  each), festive override, budget, contact limits, targeting, the offer menu and fallbacks. Every edit is validated as
+  you type; changed fields are highlighted, a change list and margin warnings appear, then **Dry run** (OfferIQ
+  under the live vs the edited rules) and **Approve & publish** with a note; version history.
+  Example dry run: raising the electronics cap from 5% to 12% changes OfferIQ's extra profit by only −₹23, because
+  the profit ranking already avoids discounting a category with an 8% margin; the margin warning still fires.
+- **Evidence**: churn AUC and calibration curve, Hillstrom Qini curve vs random, measured effect per offer with
+  95% CIs, synthetic vs real purchase-gap distributions, the 8 realism checks, live bot counts, and an "honest
+  limits" list (per-person uplift ρ = 0.17; sleeping dogs mostly not found; the live test is small).
+- **Decision log**: filters by status, tier and channel; a drawer with the reason, the offer, the message, every
+  rule check, the Claude calls and what the person tapped.
+- Checked in the in-app browser against the local API: every page loads; the draft check, margin warning and dry
+  run work; a real bot decision shows its 31 passed checks, two Sonnet calls and the claim.
+
+Tests: `tests/test_dashboard.py` (15 tests): policy store (default live, publish, invalid rejected, diff), the bot
+uses a published version, the rule author with a fake Claude (valid proposal, retry with errors, gives up after two,
+"can't apply", kill switch), API login and forged tokens, check → publish flow, empty database, and the Lab (expected
+vs dice-simulated orders within 6% for three strategies on 600 customers; OfferIQ beats blanket on profit and waste;
+stronger discounts raise blanket orders). **230 tests pass.**
+
 ### Quality and safety so far
 
 - **214 tests pass** (after the 24 Oct restart fix; ~1.5–3.5 min), and ruff lint is clean. The tests cover:
@@ -1089,6 +1181,9 @@ cd ../frontend && npm install && npm run dev                # dashboard → http
 | 26 Oct 10:4x | `timestamp with time zone` vs text: SQLModel had silently made timestamp columns timezone-aware | Every model timestamp is `NaiveDatetime` (naive IST, as documented) |
 | 26 Oct 10:5x | Mixed timestamp formats (with and without fractional seconds) broke parsing during export | `pd.to_datetime(format="mixed")` |
 | 26 Oct ~12:00 | First Render deploy failed. Suspected cause: Render generates `TELEGRAM_WEBHOOK_SECRET` as base64 (`+ / =`), which Telegram rejects in `set_webhook`, and a bot error at startup took the whole app down | The bot sends a hex SHA-256 of the secret (always Telegram-safe) and checks the same value; a bot startup failure is now logged without stopping the API and dashboard (`/api/health` shows `webhook: false`). Confirmed by the next deploy: it went live with this fix |
+| 26 Oct ~13:20 | Policy Lab first used the dice simulator: results jumped by tens of thousands of ₹ between seeds | Expected values from the simulator's own equations; the dice version is kept as a test cross-check |
+| 26 Oct ~13:40 | Expected orders for blanket 20% were ~10% above the simulator | The simulator ends the boost at the first order (the coupon is used); the formula now does the same. Agreement within ~1.5% |
+| 26 Oct ~15:10 | Dashboard charts showed dots but no lines in the app's browser pane | Recharts animates lines by stroke-dash; the animation stalls in a background pane. Animations are off (`isAnimationActive={false}`) |
 
 ## 9. Timeline
 
@@ -1201,6 +1296,10 @@ All times IST, Thu 22 Oct 2026.
   - corrected the docs session's earlier "duplicate processes" report: those were Windows venv launcher plus
     interpreter pairs, never duplicates
 
+- **26 Oct 12:45–15:30, main:** while the user tested the cloud bot on their phone, the build session made the
+  Policy Lab, versioned policies, the Claude rule author, the dashboard API and the React dashboard (Overview,
+  Policy Lab, Rules Studio, Evidence, Decision log). One live Opus call (~4k tokens). 230 tests pass.
+
 ## 10. Open items and the user's to-dos
 
 - [ ] Push the commits (`git push`); make the repo public, or share it with the judges, before submission.
@@ -1210,7 +1309,7 @@ All times IST, Thu 22 Oct 2026.
       and `/setuserpic`.
 - [ ] Share https://t.me/Dilnazecom_bot with classmates, and recruit 3–5 testers. Offers asked for between 21:00 and 09:00 IST are queued until 09:00. The bot runs in the cloud now (Render free sleeps after 15 min idle; the first message then takes ~30–60 s to wake it).
 - [ ] Delete `backend/offeriq.db.stale` (378 MB leftover) when convenient.
-- [ ] Step 8: free container host, Neon and Vercel accounts; choose a dashboard password. `WEBHOOK_URL` gets the
+- [x] ~~Step 8 hosting~~: done on Render + Neon (Vercel not needed: the API serves the dashboard). Old note: free container host, Neon and Vercel accounts; choose a dashboard password. `WEBHOOK_URL` gets the
       deployed backend's public address then (e.g. `…/api/telegram/webhook`), and `TELEGRAM_WEBHOOK_SECRET` is
       generated; until then the bot polls from the laptop.
 - [ ] Later steps will ask for: checking the default margins and discount caps, the bot's voice and languages, and
@@ -1239,6 +1338,9 @@ All times IST, Thu 22 Oct 2026.
 | Live AI decisions (20 customers) | 9 accepted first time, 1 fixed on retry, 0 failed calls; median 3.0 s per call; ~US $0.01 per decision; messages in EN / Hinglish / Punjabi |
 | Prompt-injection defence | Guard flags 37/40 attacks (0/10 false alarms); with a Claude that obeys every attack, 80/80 still sent nothing that breaks a rule |
 | Telegram flow | 5-tap quiz → digital twin from 5,000 customers → browse real products → abandoned-cart offer by Claude, checked by the rules and re-checked at send time → Claim / Not for me / Why me?; 10% live holdout by chat |
-| Tests | 214 passing; lint clean |
-| Bot | @Dilnazecom_bot, live in polling mode |
+| Tests | 230 passing; lint clean |
+| Bot | @Dilnazecom_bot, live in the cloud (Render, webhook) on Neon data |
+| Policy Lab (5,000 customers, 14 days, ground truth) | 20% off for everyone: **−₹1,81,079** extra profit (₹2,22,641 of discount to people who'd buy anyway). OfferIQ: **+₹44,073** for ₹9,832 of offer cost (₹5.48 back per ₹1). Holds at 2× discount strength |
+| Fairness | OfferIQ offer-rate gap ≤ 4.3 pp across city tier, gender and age (gender/age never used to target) |
+| Rules Studio | Plain-English edits by Claude Opus → schema check → diff + margin warnings → dry run → human publish; versioned, the bot picks up the new version in ≤ 15 s |
 | Safety design | 7 guardrail layers, 6-tier fallback (3 tiers without AI), models blocked from ground truth |

@@ -23,3 +23,5 @@ services:
         value: "2000000"
       - key: OFFERIQ_AI_ENABLED
         value: "1"
+      - key: OFFERIQ_LAB_SAMPLE         # Policy Lab sample size: the free plan has 0.1 CPU
+        value: "1500"

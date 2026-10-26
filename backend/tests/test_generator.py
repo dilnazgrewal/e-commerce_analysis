@@ -79,7 +79,13 @@ def test_synthetic_data_passes_realism_checks(world):
 def test_models_never_read_hidden_traits():
     """Only the simulator/seed code may touch the ground-truth table."""
     app_dir = Path(__file__).resolve().parents[1] / "app"
-    allowed = {"models/tables.py", "models/__init__.py", "data/generate.py", "data/simulator.py"}
+    allowed = {
+        "models/tables.py",
+        "models/__init__.py",
+        "data/generate.py",
+        "data/simulator.py",
+        "experiments/policy_lab.py",  # scores policies against ground truth (rule 4 allows it)
+    }
     # analytics/, agent/, rules/ … must never appear here
     offenders = [
         str(path.relative_to(app_dir)).replace("\\", "/")

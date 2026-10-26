@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app import __version__
+from app.api.dashboard import router as dashboard_router
 from app.config import get_settings
 
 log = logging.getLogger("offeriq.api")
@@ -83,6 +84,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+app.include_router(dashboard_router)
 
 
 def request_bot_running() -> bool:

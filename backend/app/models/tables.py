@@ -168,6 +168,19 @@ class Feedback(SQLModel, table=True):
     created_at: NaiveDatetime
 
 
+class PolicyVersion(SQLModel, table=True):
+    """Every published version of the offer policy. The newest one is live for the bot and the API."""
+
+    __tablename__ = "policy_versions"
+
+    id: int | None = Field(default=None, primary_key=True)
+    version: int = Field(index=True)
+    body: str  # the full policy as JSON (validated by rules/schema.py before it is stored)
+    author: str
+    note: str = ""
+    created_at: NaiveDatetime
+
+
 class SimHiddenTrait(SQLModel, table=True):
     """Simulator ground truth. Analytics and models must NEVER read this table."""
 

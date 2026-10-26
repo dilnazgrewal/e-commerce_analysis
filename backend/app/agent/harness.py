@@ -17,6 +17,7 @@ import anthropic
 from app.config import get_settings
 
 CALL_TIMEOUT_S = 20.0  # measured: a trivial Sonnet 5.5 tool call took ~8 s, so the planned 8 s was too tight
+RULE_AUTHOR_TIMEOUT_S = 120.0
 BREAKER_FAILURES = 5
 BREAKER_WINDOW_S = 120
 BREAKER_COOLDOWN_S = 300
@@ -29,10 +30,10 @@ class LLM(Protocol):
 
 
 class AnthropicLLM:
-    def __init__(self, beta: bool) -> None:
+    def __init__(self, beta: bool, timeout_s: float = CALL_TIMEOUT_S) -> None:
         key = get_settings().anthropic_api_key
         client = anthropic.Anthropic(api_key=key.get_secret_value() if key else None)
-        client = client.with_options(timeout=CALL_TIMEOUT_S, max_retries=1)
+        client = client.with_options(timeout=timeout_s, max_retries=1)
         self._create = client.beta.messages.create if beta else client.messages.create
 
     def create(self, **kwargs: Any) -> Any:
@@ -112,11 +113,16 @@ class Harness:
         sonnet: LLM | None = None,
         haiku: LLM | None = None,
         budget: TokenBudget | None = None,
+        opus: LLM | None = None,
         breaker: CircuitBreaker | None = None,
     ) -> None:
         settings = get_settings()
-        self.has_key = settings.anthropic_api_key is not None or (sonnet is not None and haiku is not None)
-        self._sonnet, self._haiku = sonnet, haiku
+        self.has_key = (
+            settings.anthropic_api_key is not None
+            or (sonnet is not None and haiku is not None)
+            or (opus is not None)
+        )
+        self._sonnet, self._haiku, self._opus = sonnet, haiku, opus
         self.budget = budget or TokenBudget(settings.claude_daily_token_budget)
         self.breaker = breaker or CircuitBreaker()
 
@@ -131,6 +137,13 @@ class Harness:
         if self._haiku is None:
             self._haiku = AnthropicLLM(beta=False)
         return self._haiku
+
+    @property
+    def opus(self) -> LLM:
+        """Rule authoring only (dashboard, a person waiting): a full policy takes longer to write."""
+        if self._opus is None:
+            self._opus = AnthropicLLM(beta=True, timeout_s=RULE_AUTHOR_TIMEOUT_S)
+        return self._opus
 
     def unavailable_reason(self) -> str | None:
         if not ai_enabled():

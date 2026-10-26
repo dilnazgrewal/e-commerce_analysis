@@ -10,6 +10,7 @@ from app.agent.harness import Harness
 from app.agent.pipeline import decide
 from app.bot import store
 from app.models import BotUser
+from app.rules import policy_store
 from app.rules.context import load_activity, load_contexts, load_history
 from app.rules.decide import Decision, _decision
 from app.rules.effects import OfferEffects
@@ -32,9 +33,14 @@ def next_morning(now: datetime, policy: Policy) -> datetime:
 @dataclass
 class Services:
     engine: Engine
-    policy: Policy
+    base_policy: Policy  # used until the marketing team publishes a version from the dashboard
     effects: OfferEffects
     harness: Harness
+
+    @property
+    def policy(self) -> Policy:
+        """The live policy: the newest published version (rules edits apply to the next offer)."""
+        return policy_store.active(self.engine, self.base_policy)
 
 
 def offer_for(
