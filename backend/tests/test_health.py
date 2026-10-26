@@ -28,7 +28,7 @@ def test_webhook_rejects_forged_calls_and_queues_real_ones(monkeypatch):
 
     from app.config import get_settings
 
-    monkeypatch.setenv("TELEGRAM_WEBHOOK_SECRET", "s3cret")
+    monkeypatch.setenv("TELEGRAM_WEBHOOK_SECRET", "s3cr+/et==")  # base64-like, as hosts generate
     get_settings.cache_clear()
     queue: asyncio.Queue = asyncio.Queue()
     app.state.bot = SimpleNamespace(update_queue=queue, bot=None)
@@ -42,8 +42,12 @@ def test_webhook_rejects_forged_calls_and_queues_real_ones(monkeypatch):
             "/api/telegram/webhook", json=update, headers={"X-Telegram-Bot-Api-Secret-Token": "no"}
         )
         assert forged.status_code == 403 and queue.empty()
+        from app.main import telegram_secret_token
+
+        token = telegram_secret_token(get_settings())
+        assert token.isalnum()  # Telegram only accepts A-Z a-z 0-9 _ - in the secret
         ok = client.post(
-            "/api/telegram/webhook", json=update, headers={"X-Telegram-Bot-Api-Secret-Token": "s3cret"}
+            "/api/telegram/webhook", json=update, headers={"X-Telegram-Bot-Api-Secret-Token": token}
         )
         assert ok.status_code == 200 and queue.qsize() == 1
     finally:

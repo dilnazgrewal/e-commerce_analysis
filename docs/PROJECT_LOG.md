@@ -1088,6 +1088,7 @@ cd ../frontend && npm install && npm run dev                # dashboard → http
 | 26 Oct 10:3x | `integer out of range`: Telegram chat IDs (e.g. ~8.4 billion) don't fit Postgres INTEGER | Chat-ID columns are BIGINT |
 | 26 Oct 10:4x | `timestamp with time zone` vs text: SQLModel had silently made timestamp columns timezone-aware | Every model timestamp is `NaiveDatetime` (naive IST, as documented) |
 | 26 Oct 10:5x | Mixed timestamp formats (with and without fractional seconds) broke parsing during export | `pd.to_datetime(format="mixed")` |
+| 26 Oct ~12:00 | First Render deploy failed. Suspected cause: Render generates `TELEGRAM_WEBHOOK_SECRET` as base64 (`+ / =`), which Telegram rejects in `set_webhook`, and a bot error at startup took the whole app down | The bot sends a hex SHA-256 of the secret (always Telegram-safe) and checks the same value; a bot startup failure is now logged without stopping the API and dashboard (`/api/health` shows `webhook: false`). Confirmation from the build log pending |
 
 ## 9. Timeline
 
