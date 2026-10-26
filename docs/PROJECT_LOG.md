@@ -8,7 +8,7 @@
 > feature, dataset, decision or fix lands (rule in [CLAUDE.md](../CLAUDE.md), section "Documentation").
 > Each entry in the [timeline](#9-timeline) says which session did it.
 >
-> Last updated: **Mon 26 Oct 2026, ~10:00 IST**, after cloud-deployment preparation (main build session).
+> Last updated: **Mon 26 Oct 2026, ~11:30 IST**, after the database was copied to Neon (main build session).
 > Step 5 facts were added at 21:54 by the main build session.
 
 Sessions referred to below:
@@ -154,6 +154,8 @@ CLV, so the profit maths reflects long-term value.
 | **Re-plan for the last day** (26 Oct): the bot is only the delivery channel. The missing piece is the marketer's side, which should show whether offers work. Priorities: (1) deploy the bot, (2) a dashboard built around a **Policy Lab** (simulate strategies on the synthetic customers, with ground truth and a sensitivity slider), **Rules Studio** with plain-English Claude edits, an **evidence and fairness page** and a decision log, (3) budget planner and AI analyst if time allows, (4) README and submission. Health page and bandit dropped or shrunk | User asked for a critical analysis of the approach; Claude proposed this; the user agreed ("ok then let's get going") | 26 Oct ~09:30 | Usability, design and "how you would know whether offers work" are judged but weren't visible; the analysis also flagged that offer-type strengths are a simulator assumption (made visible via sensitivity) |
 | **Hosting: Render free web service + Neon free Postgres**; one container serves the API, the dashboard and the bot (webhook mode) | Claude, after checking current free-tier terms | 26 Oct ~09:40 | Render sleeps after 15 min without traffic, but a Telegram webhook call wakes it; its disk is ephemeral, so data lives in Neon (0.5 GB). Hugging Face Spaces was rejected: its docs conflict on whether Docker Spaces need a paid plan, and users report free CPU capacity problems |
 | **Cloud database is slimmed**: everything except browsing events older than 14 days | Claude | 26 Oct ~09:45 | Serving only needs recent activity; this keeps it far below Neon's 0.5 GB. Training stays local |
+| **Render region Ohio**, not Singapore | Claude | 26 Oct ~11:00 | The user's Neon project was created in AWS us-east-2 (Ohio); putting the service next to the database avoids a cross-continent round trip on every query |
+| **All timestamp columns are naive** (`NaiveDatetime`), and Telegram chat IDs are **BIGINT** | Claude | 26 Oct ~11:10 | SQLModel maps `datetime` to a timezone-aware column, which contradicts the project's naive-IST convention; real chat IDs exceed 32-bit integers. SQLite had hidden both |
 
 The full approved plan is kept outside the repo at
 `C:\Users\HP\.claude\plans\d-desktop-hackathon-2-brief-pdf-https-g-abstract-pillow.md`. Its sections A–G and 1–12 are
@@ -1082,6 +1084,10 @@ cd ../frontend && npm install && npm run dev                # dashboard → http
 | 21:4x | Test bot user set to Punjabi while the fake Claude writes English; the language check (correctly) rejected the messages | Test user set to English |
 | 22 Oct 22:xx / 23 Oct 21:xx | The background bot process stopped twice when the build session ended (exit code 4, no error logged); offers queued for 09:00 would have been lost because jobs live in memory | The bot is restarted at the start of each working session. On startup it re-schedules unreleased queued decisions from the log; a test simulates a restart (24 Oct 08:45) |
 | 23 Oct 21:3x | After a reboot, the bot printed nothing for over a minute and looked hung | Not a hang: importing the Anthropic SDK, pandas and SQLAlchemy took ~25 s on a cold disk cache. The next start took ~10 s |
+| 26 Oct 10:2x | Export to Neon failed: 5,000 rows × 21 columns exceed Postgres's 65,535 values per statement | Batch size is computed from the column count |
+| 26 Oct 10:3x | `integer out of range`: Telegram chat IDs (e.g. ~8.4 billion) don't fit Postgres INTEGER | Chat-ID columns are BIGINT |
+| 26 Oct 10:4x | `timestamp with time zone` vs text: SQLModel had silently made timestamp columns timezone-aware | Every model timestamp is `NaiveDatetime` (naive IST, as documented) |
+| 26 Oct 10:5x | Mixed timestamp formats (with and without fractional seconds) broke parsing during export | `pd.to_datetime(format="mixed")` |
 
 ## 9. Timeline
 
@@ -1172,6 +1178,9 @@ All times IST, Thu 22 Oct 2026.
   - the API also serves the built dashboard
   - `Dockerfile` and `render.yaml`; 2 new tests
   - Waiting for the user's Neon and Render accounts.
+- **26 Oct 10:15–11:30, main:** the user created a Neon project and saved its connection string in `.env` (checked by shape, never printed). The export hit four Postgres type problems (§8), all fixed.
+  - Final copy: customers 5,000 · products 15,145 · orders 26,111 · order items 35,130 · campaign assignments 12,469 · simulator traits 5,000 · decisions 3 · bot users 1 · feedback 1 · events 154,156 (last 14 days) · customer scores 5,000 · model runs 5. **58 MB** of Neon's 0.5 GB; the upload took 364 s.
+  - Read-only check against Neon: twin matching (4,899 candidates), context, history, recent activity, twin summary, products, the user's bot record and queued offers all returned correct data. 216 tests pass.
 - **~22:05, docs:** step 5 entries checked against the code, and all match:
   - 213 tests
   - the twin-matching weights

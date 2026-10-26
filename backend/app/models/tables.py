@@ -1,8 +1,9 @@
 """Database tables for the platform's data (what an e-commerce site would send OfferIQ)."""
 
-from datetime import date, datetime
+from datetime import date
 
 from pydantic import NaiveDatetime
+from sqlalchemy import BigInteger
 from sqlmodel import Field, SQLModel
 
 
@@ -29,7 +30,8 @@ class Customer(SQLModel, table=True):
     points_balance: int = 0
     points_expiry_date: date | None = None
     opted_out: bool = False
-    telegram_chat_id: int | None = Field(default=None, index=True)
+    # Telegram chat IDs exceed 32-bit integers, so these columns are BIGINT.
+    telegram_chat_id: int | None = Field(default=None, sa_type=BigInteger, index=True)
     twin_of: str | None = None
 
 
@@ -55,7 +57,7 @@ class Event(SQLModel, table=True):
     event_id: str = Field(primary_key=True)
     customer_id: str = Field(index=True, foreign_key="customers.customer_id")
     type: str = Field(index=True)
-    ts: datetime = Field(index=True)
+    ts: NaiveDatetime = Field(index=True)
     product_id: str | None = None
     price_inr: int | None = None
     session_id: str | None = None
@@ -70,7 +72,7 @@ class Order(SQLModel, table=True):
 
     order_id: str = Field(primary_key=True)
     customer_id: str = Field(index=True, foreign_key="customers.customer_id")
-    ts: datetime = Field(index=True)
+    ts: NaiveDatetime = Field(index=True)
     gross_inr: int
     discount_inr: int = 0
     coupon_code: str | None = None
@@ -103,8 +105,8 @@ class CampaignAssignment(SQLModel, table=True):
     arm: str
     offer_type: str | None = None
     offer_value: float | None = None
-    sent_at: datetime
-    valid_until: datetime
+    sent_at: NaiveDatetime
+    valid_until: NaiveDatetime
 
 
 class OfferDecision(SQLModel, table=True):
@@ -114,7 +116,7 @@ class OfferDecision(SQLModel, table=True):
 
     decision_id: str = Field(primary_key=True)
     customer_id: str = Field(index=True, foreign_key="customers.customer_id")
-    created_at: datetime = Field(index=True)
+    created_at: NaiveDatetime = Field(index=True)
     trigger: str
     tier: str  # T1..T6
     status: str = Field(index=True)  # sent | holdout | queued | suppressed | claimed | dismissed
@@ -123,7 +125,7 @@ class OfferDecision(SQLModel, table=True):
     offer_value: float | None = None
     category: str | None = None
     code: str | None = None
-    valid_until: datetime | None = None
+    valid_until: NaiveDatetime | None = None
     message_lang: str | None = None
     message_text: str | None = None
     expected_cost_inr: float | None = None
@@ -142,7 +144,7 @@ class BotUser(SQLModel, table=True):
 
     __tablename__ = "bot_users"
 
-    chat_id: int = Field(primary_key=True)
+    chat_id: int = Field(primary_key=True, sa_type=BigInteger)
     first_name: str
     language: str = "en"
     quiz: str = "{}"  # JSON answers
@@ -160,7 +162,7 @@ class Feedback(SQLModel, table=True):
 
     id: int | None = Field(default=None, primary_key=True)
     decision_id: str = Field(index=True)
-    chat_id: int = Field(index=True)
+    chat_id: int = Field(index=True, sa_type=BigInteger)
     action: str  # claimed | dismissed | why | reason
     detail: str | None = None
     created_at: NaiveDatetime

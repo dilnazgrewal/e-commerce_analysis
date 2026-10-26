@@ -4,7 +4,7 @@ services:
     name: offeriq
     runtime: docker
     plan: free
-    region: singapore
+    region: ohio            # next to the Neon database (AWS us-east-2)
     dockerfilePath: ./Dockerfile
     healthCheckPath: /api/health
     autoDeploy: true

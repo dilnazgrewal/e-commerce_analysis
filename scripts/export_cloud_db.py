@@ -46,9 +46,9 @@ def coerce(frame: pd.DataFrame, table: str) -> pd.DataFrame:
         if isinstance(column.type, Boolean):
             frame[column.name] = frame[column.name].astype("boolean")
         elif isinstance(column.type, DateTime):
-            frame[column.name] = pd.to_datetime(frame[column.name])
+            frame[column.name] = pd.to_datetime(frame[column.name], format="mixed")
         elif isinstance(column.type, Date):
-            frame[column.name] = pd.to_datetime(frame[column.name]).dt.date
+            frame[column.name] = pd.to_datetime(frame[column.name], format="mixed").dt.date
     return frame
 
 
@@ -79,11 +79,13 @@ def main() -> None:
             mode = "append"  # keep the SQLModel schema (types, keys, indexes)
         else:
             if "scored_at" in frame:
-                frame["scored_at"] = pd.to_datetime(frame["scored_at"])
+                frame["scored_at"] = pd.to_datetime(frame["scored_at"], format="mixed")
             mode = "replace"
         if table == "order_items" and "id" in frame:
             frame = frame.drop(columns=["id"])  # let Postgres assign the serial ids
-        frame.to_sql(table, target, if_exists=mode, index=False, chunksize=5000, method="multi")
+        # Postgres allows at most 65,535 bound values per statement: size batches by column count.
+        rows_per_batch = max(1, 60_000 // max(len(frame.columns), 1))
+        frame.to_sql(table, target, if_exists=mode, index=False, chunksize=rows_per_batch, method="multi")
         print(f"  {table:22} {len(frame):>9,} rows")
 
     with target.connect() as conn:
