@@ -1088,7 +1088,7 @@ cd ../frontend && npm install && npm run dev                # dashboard → http
 | 26 Oct 10:3x | `integer out of range`: Telegram chat IDs (e.g. ~8.4 billion) don't fit Postgres INTEGER | Chat-ID columns are BIGINT |
 | 26 Oct 10:4x | `timestamp with time zone` vs text: SQLModel had silently made timestamp columns timezone-aware | Every model timestamp is `NaiveDatetime` (naive IST, as documented) |
 | 26 Oct 10:5x | Mixed timestamp formats (with and without fractional seconds) broke parsing during export | `pd.to_datetime(format="mixed")` |
-| 26 Oct ~12:00 | First Render deploy failed. Suspected cause: Render generates `TELEGRAM_WEBHOOK_SECRET` as base64 (`+ / =`), which Telegram rejects in `set_webhook`, and a bot error at startup took the whole app down | The bot sends a hex SHA-256 of the secret (always Telegram-safe) and checks the same value; a bot startup failure is now logged without stopping the API and dashboard (`/api/health` shows `webhook: false`). Confirmation from the build log pending |
+| 26 Oct ~12:00 | First Render deploy failed. Suspected cause: Render generates `TELEGRAM_WEBHOOK_SECRET` as base64 (`+ / =`), which Telegram rejects in `set_webhook`, and a bot error at startup took the whole app down | The bot sends a hex SHA-256 of the secret (always Telegram-safe) and checks the same value; a bot startup failure is now logged without stopping the API and dashboard (`/api/health` shows `webhook: false`). Confirmed by the next deploy: it went live with this fix |
 
 ## 9. Timeline
 
@@ -1182,6 +1182,11 @@ All times IST, Thu 22 Oct 2026.
 - **26 Oct 10:15–11:30, main:** the user created a Neon project and saved its connection string in `.env` (checked by shape, never printed). The export hit four Postgres type problems (§8), all fixed.
   - Final copy: customers 5,000 · products 15,145 · orders 26,111 · order items 35,130 · campaign assignments 12,469 · simulator traits 5,000 · decisions 3 · bot users 1 · feedback 1 · events 154,156 (last 14 days) · customer scores 5,000 · model runs 5. **58 MB** of Neon's 0.5 GB; the upload took 364 s.
   - Read-only check against Neon: twin matching (4,899 candidates), context, history, recent activity, twin summary, products, the user's bot record and queued offers all returned correct data. 216 tests pass.
+- **26 Oct ~12:00–12:45, main:** deployment.
+  - The user created the Render service from the blueprint. The first deploy failed; the webhook-secret fix (`fcf4450`) went live.
+  - Render assigned **https://offeriq-12t1.onrender.com** (`offeriq.onrender.com` belongs to an unrelated US real-estate company also called OfferIQ).
+  - Checked from outside: `/api/health` → `env: cloud`, Telegram, Claude and webhook all true; the root page returns 200; Telegram's `getWebhookInfo` shows the cloud URL with no pending updates and no delivery error.
+  - The laptop bot is no longer needed: **the bot now runs in the cloud** (Render free, Ohio) on the Neon data.
 - **~22:05, docs:** step 5 entries checked against the code, and all match:
   - 213 tests
   - the twin-matching weights
@@ -1203,7 +1208,7 @@ All times IST, Thu 22 Oct 2026.
       running only one bot per token.
 - [ ] Optional: improve the bot in @BotFather with `/setname` (e.g. "OfferIQ: Smart Offers"), `/setdescription`
       and `/setuserpic`.
-- [ ] Share https://t.me/Dilnazecom_bot with classmates, and recruit 3–5 testers (step 5 is live). Offers asked for between 21:00 and 09:00 IST are queued until 09:00; the bot only runs while the laptop and its process are on.
+- [ ] Share https://t.me/Dilnazecom_bot with classmates, and recruit 3–5 testers. Offers asked for between 21:00 and 09:00 IST are queued until 09:00. The bot runs in the cloud now (Render free sleeps after 15 min idle; the first message then takes ~30–60 s to wake it).
 - [ ] Delete `backend/offeriq.db.stale` (378 MB leftover) when convenient.
 - [ ] Step 8: free container host, Neon and Vercel accounts; choose a dashboard password. `WEBHOOK_URL` gets the
       deployed backend's public address then (e.g. `…/api/telegram/webhook`), and `TELEGRAM_WEBHOOK_SECRET` is
