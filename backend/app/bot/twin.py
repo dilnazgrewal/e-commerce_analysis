@@ -42,7 +42,7 @@ def candidates(engine: Engine) -> pd.DataFrame:
             "SELECT s.customer_id, c.city_tier, c.state, s.top3_categories, s.orders_365d, s.aov_inr, "
             "s.uplift_group, s.uplift_any, s.lifecycle "
             "FROM customer_scores s JOIN customers c USING(customer_id) "
-            "WHERE c.telegram_chat_id IS NULL AND c.opted_out = 0"
+            "WHERE c.telegram_chat_id IS NULL AND NOT c.opted_out"
         ),
         engine,
     )

@@ -52,10 +52,10 @@ def bind_twin(engine: Engine, chat_id: int, customer_id: str, language: str) -> 
         )
         conn.execute(
             text(
-                "UPDATE customers SET telegram_chat_id = :c, language_pref = :l, opted_out = 0 "
+                "UPDATE customers SET telegram_chat_id = :c, language_pref = :l, opted_out = :o "
                 "WHERE customer_id = :id"
             ),
-            {"c": chat_id, "l": language, "id": customer_id},
+            {"c": chat_id, "l": language, "id": customer_id, "o": False},
         )
 
 

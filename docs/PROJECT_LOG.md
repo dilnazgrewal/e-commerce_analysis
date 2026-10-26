@@ -8,7 +8,7 @@
 > feature, dataset, decision or fix lands (rule in [CLAUDE.md](../CLAUDE.md), section "Documentation").
 > Each entry in the [timeline](#9-timeline) says which session did it.
 >
-> Last updated: **Sat 24 Oct 2026, ~08:50 IST**, after queued offers were made to survive bot restarts (main build session).
+> Last updated: **Mon 26 Oct 2026, ~10:00 IST**, after cloud-deployment preparation (main build session).
 > Step 5 facts were added at 21:54 by the main build session.
 
 Sessions referred to below:
@@ -151,6 +151,9 @@ CLV, so the profit maths reflects long-term value.
 | Twin matching **prefers offer-responsive twins** (persuadable, positive uplift) among similar matches, and Punjab twins for Punjabi speakers | Claude (step 5), after a smoke test | ~21:48 | The first smoke-test twin was a "sure thing" with negative uplift, so the rules correctly never sent it anything. This biases *who* bot users are, not the live experiment (holdout is still random) |
 | **Claim = a simulated order** (with the coupon), written to the platform tables | Claude (step 5) | ~21:40 | Claims then count as real outcomes in the same data the models train on |
 | **Quiet hours queue** offers until 09:00 IST instead of dropping them; an abandoned cart triggers a decision **90 s** after "Add to cart" | Claude (step 5) | ~21:40 | Respects the rule without losing the offer; 90 s is short enough to demo, long enough to look like an abandoned cart |
+| **Re-plan for the last day** (26 Oct): the bot is only the delivery channel. The missing piece is the marketer's side, which should show whether offers work. Priorities: (1) deploy the bot, (2) a dashboard built around a **Policy Lab** (simulate strategies on the synthetic customers, with ground truth and a sensitivity slider), **Rules Studio** with plain-English Claude edits, an **evidence and fairness page** and a decision log, (3) budget planner and AI analyst if time allows, (4) README and submission. Health page and bandit dropped or shrunk | User asked for a critical analysis of the approach; Claude proposed this; the user agreed ("ok then let's get going") | 26 Oct ~09:30 | Usability, design and "how you would know whether offers work" are judged but weren't visible; the analysis also flagged that offer-type strengths are a simulator assumption (made visible via sensitivity) |
+| **Hosting: Render free web service + Neon free Postgres**; one container serves the API, the dashboard and the bot (webhook mode) | Claude, after checking current free-tier terms | 26 Oct ~09:40 | Render sleeps after 15 min without traffic, but a Telegram webhook call wakes it; its disk is ephemeral, so data lives in Neon (0.5 GB). Hugging Face Spaces was rejected: its docs conflict on whether Docker Spaces need a paid plan, and users report free CPU capacity problems |
+| **Cloud database is slimmed**: everything except browsing events older than 14 days | Claude | 26 Oct ~09:45 | Serving only needs recent activity; this keeps it far below Neon's 0.5 GB. Training stays local |
 
 The full approved plan is kept outside the repo at
 `C:\Users\HP\.claude\plans\d-desktop-hackathon-2-brief-pdf-https-g-abstract-pillow.md`. Its sections A–G and 1–12 are
@@ -1160,6 +1163,15 @@ All times IST, Thu 22 Oct 2026.
 - **23 Oct ~21:34, main:** the bot had stopped overnight (the session ended); restarted at 21:38. The user was given a step-by-step phone test script; quiet hours meant offers would queue until 09:00.
 - **24 Oct 08:13, main:** the user is back; the bot is restarted. Nobody had used it overnight (no bot users or decisions in the log).
 - **24 Oct 08:40–08:50, main:** at the user's request, queued offers now survive restarts (re-scheduled from the log on startup). 1 new test; the bot restarted with the fix.
+- **24 Oct ~12:00, main:** the user tested the bot ("Dilnaz"): twin Manpreet Dhillon from Chandigarh; a welcome offer of 2× points chosen by Claude (T1), then claimed. The user asked how it works; Claude explained that quiz answers pick a lookalike twin (cold start) whose pre-computed model scores are used, and that live taps reach Claude through recent activity but don't update the model scores until a retrain.
+- **26 Oct 09:07, main:** the bot restarted. The user asked for a critical analysis of the approach against the brief; Claude answered without changing anything (strengths, 5 weaknesses incl. the circular offer-strength assumption, and ideas A–G). The user approved the re-plan (§2).
+- **26 Oct 09:40–10:00, main:** cloud preparation:
+  - Postgres support (psycopg driver, portable boolean SQL, connection pre-ping)
+  - `scripts/export_cloud_db.py` (slim copy to Neon)
+  - webhook mode inside the API (secret-token checked; Render's own URL used automatically)
+  - the API also serves the built dashboard
+  - `Dockerfile` and `render.yaml`; 2 new tests
+  - Waiting for the user's Neon and Render accounts.
 - **~22:05, docs:** step 5 entries checked against the code, and all match:
   - 213 tests
   - the twin-matching weights

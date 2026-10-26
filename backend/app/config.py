@@ -18,6 +18,7 @@ class Settings(BaseSettings):
 
     app_env: str = "local"
     database_url: str = "sqlite:///./offeriq.db"
+    cloud_database_url: SecretStr | None = None  # only used by scripts/export_cloud_db.py
 
     # Secrets are SecretStr so they never show up in logs or reprs.
     telegram_bot_token: SecretStr | None = None

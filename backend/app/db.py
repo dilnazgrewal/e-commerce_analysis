@@ -11,12 +11,26 @@ from app.config import get_settings
 _engine: Engine | None = None
 
 
+def normalise_url(url: str) -> str:
+    """Hosted Postgres hands out plain postgres:// URLs; use the installed psycopg (v3) driver."""
+    for prefix in ("postgres://", "postgresql://"):
+        if url.startswith(prefix):
+            return "postgresql+psycopg://" + url[len(prefix) :]
+    return url
+
+
+def make_engine(url: str) -> Engine:
+    url = normalise_url(url)
+    if url.startswith("sqlite"):
+        return create_engine(url, connect_args={"check_same_thread": False})
+    # Neon scales to zero and drops idle connections: test each one before use.
+    return create_engine(url, pool_pre_ping=True, pool_recycle=300)
+
+
 def get_engine() -> Engine:
     global _engine
     if _engine is None:
-        url = get_settings().database_url
-        connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
-        _engine = create_engine(url, connect_args=connect_args)
+        _engine = make_engine(get_settings().database_url)
     return _engine
 
 

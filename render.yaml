@@ -1,0 +1,25 @@
+# Render blueprint: one free web service (API + dashboard + Telegram webhook). Data lives in Neon Postgres.
+services:
+  - type: web
+    name: offeriq
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL            # Neon connection string (postgresql://…)
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET # random; Telegram echoes it so forged webhook calls are rejected
+        generateValue: true
+      - key: DASHBOARD_PASSWORD
+        sync: false
+      - key: CLAUDE_DAILY_TOKEN_BUDGET
+        value: "2000000"
+      - key: OFFERIQ_AI_ENABLED
+        value: "1"
