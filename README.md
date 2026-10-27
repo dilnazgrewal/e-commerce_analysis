@@ -58,10 +58,16 @@ Prerequisites: [uv](https://docs.astral.sh/uv/), Node 20+, a Telegram bot token 
 cp .env.example .env          # then fill in TELEGRAM_BOT_TOKEN and ANTHROPIC_API_KEY
 cd backend
 uv sync
-uv run uvicorn app.main:app --reload       # API → http://localhost:8000/docs
-uv run python -m app.bot.telegram_bot      # bot (polling mode)
+uv run python ../scripts/bootstrap_data.py   # 1. sample the real datasets → calibration/ (once, ~300 MB download)
+uv run python ../scripts/seed_db.py          # 2. 5,000 synthetic customers + 12-month history → offeriq.db
+uv run python ../scripts/train_models.py     # 3. churn, uplift, CLV, segments → customer_scores (~5 min)
+uv run uvicorn app.main:app --reload         # API → http://localhost:8000/docs
 uv run pytest
 ```
+
+The bot runs inside the API in the cloud (webhook mode). To run it locally instead, use
+`uv run python -m app.bot.telegram_bot` (polling mode), **but only while no cloud deployment uses the same token**:
+polling and the cloud webhook cannot share a bot, and starting the local bot takes Telegram away from the cloud one.
 
 ```bash
 cd frontend
@@ -146,7 +152,8 @@ Every proposed offer runs through up to **35 named checks** (contact, offer and 
 for each one. A message fails, for example, if any number in it isn't a fact of the offer, or if it uses false
 urgency or names a competitor.
 
-How an offer is chosen (rules-only tiers; Claude is added in front in step 4 and goes through the same checks):
+How the rules choose an offer on their own (tiers T4–T6). Claude runs in front of them as T1–T3, below, and every
+Claude choice goes through the same checks:
 1. **T6 gates:** holdout, opt-out, quiet hours (queued), frequency, cool-down, sleeping dogs → no offer.
 2. **T4:** the allowed offer with the highest **expected profit** = uplift × (order margin + retention value) −
    P(buy with offer) × cost. Uplift is "model picks *who*, measured A/B effects pick *which*".
@@ -213,8 +220,10 @@ Tests:
 2. You're matched to your **digital twin**, the most similar of the 5,000 synthetic customers, and their 12-month
    history becomes yours.
 3. **First offer:** chosen by Claude, checked by the rules, re-checked at send time.
-4. `/browse` shows real catalogue products. Leave something in the cart and an abandoned-cart offer arrives 90 s
-   later.
+4. `/browse` shows real catalogue products. Leave something in the cart and the abandoned-cart trigger fires 90 s
+   later (adding another item restarts the timer). An offer arrives only if the rules allow it: for example, not
+   within 2 days of your last offer and never while another offer is still active. Otherwise the Decision log shows
+   it as *suppressed* with the reasons.
 5. Every offer card has **🛒 Claim** (a simulated order with the coupon), **🙅 Not for me** (with an optional
    reason) and **❓ Why me?** (the reason, the expected effect, who chose it, and how many rule checks passed).
 
@@ -226,7 +235,7 @@ Also:
 
 ```bash
 cd backend
-uv run python -m app.bot.telegram_bot     # polling mode; run only ONE copy per bot token
+uv run python -m app.bot.telegram_bot     # local polling mode; NOT while the cloud bot is live (same token)
 ```
 
 ## Marketing dashboard
