@@ -8,8 +8,7 @@
 > feature, dataset, decision or fix lands (rule in [CLAUDE.md](../CLAUDE.md), section "Documentation").
 > Each entry in the [timeline](#9-timeline) says which session did it.
 >
-> Last updated: **Mon 26 Oct 2026, ~15:30 IST**, after the Policy Lab, Rules Studio and dashboard landed (main
-> build session).
+> Last updated: **Tue 27 Oct 2026, ~06:30 IST**, after the Live engine page landed (main build session).
 > Step 5 facts were added at 21:54 by the main build session.
 
 Sessions referred to below:
@@ -936,6 +935,39 @@ uses a published version, the rule author with a fake Claude (valid proposal, re
 vs dice-simulated orders within 6% for three strategies on 600 customers; OfferIQ beats blanket on profit and waste;
 stronger discounts raise blanket orders). **230 tests pass.**
 
+### Live engine: the decision made visible (main build session, 27 Oct ~05:35–06:30 IST)
+
+**Why:** the user's classmates reported from a meeting with the instructor that the project should show the core
+back-end working ("this customer is coming, this is the offer they should get, and why"), not a polished
+dashboard. The user asked for that within an hour; Claude built it as the first screen.
+
+**What:** [api/engine.py](../backend/app/api/engine.py) and [pages/Engine.tsx](../frontend/src/pages/Engine.tsx).
+`POST /api/engine/trace` takes a customer (or picks one at random) and returns every step of one decision:
+1. the platform's input event (input contract; by default the customer's last add-to-cart, replayed 95 min ago);
+2. the customer's profile and last 14 days of activity;
+3. the model scores (churn, chance to buy without an offer, uplift, 90-day value, segment, lifecycle);
+4. the trigger and the detector rule that fired (cart idle ≥ 60 min, points expiring, churn ≥ 60%);
+5. the contact checks (opt-out, holdout, frequency cap, cool-down, quiet hours);
+6. **every offer on the menu**, allowed or blocked, with extra chance to buy, cost if used, expected cost,
+   expected profit and the exact rule that blocked it;
+7. the decision (tier T1–T6, the reason, offer, code, message; Claude's calls when "Let Claude choose" is on);
+8. all rule checks on the final offer and message;
+9. the Decision JSON returned to the platform (output contract).
+
+`POST /api/engine/batch` runs 25 random customers through the rules engine as a burst of platform traffic; any row
+opens its full trace. Both are dry runs: nothing is sent or logged, so testers' contact limits are untouched. The
+engine clock is 11:00 IST today, outside quiet hours.
+
+**Example run (C00368, Harleen Kaur, Amritsar, tier 2):** add-to-cart of a ₹439 item → churn 2%, chance to buy
+53.9%, uplift +10.4 pp, persuadable, active, mostly Electronics → trigger cart abandoned (95 min idle) → contact
+allowed → 4 of 10 offers allowed (bonus points expected profit ₹48.2, reminder ₹27.9, early access ₹22.2, free
+delivery ₹9.3; % off, ₹ off and UPI cashback blocked for negative expected profit; win-back blocked by the 5%
+Electronics cap) → T4 bonus points, chance to buy 53.8% → 69.9% → Punjabi message, 27 of 27 rule checks passed.
+The live engine is now the dashboard's first page; the Decision log is second.
+
+Test: `test_engine_trace_shows_every_step_and_sends_nothing` (5 traces + a batch of 10 on the seeded DB; every sent
+offer passes every check; the decision log row count is unchanged).
+
 ### Quality and safety so far
 
 - **214 tests pass** (after the 24 Oct restart fix; ~1.5–3.5 min), and ruff lint is clean. The tests cover:
@@ -1300,6 +1332,10 @@ All times IST, Thu 22 Oct 2026.
   Policy Lab, versioned policies, the Claude rule author, the dashboard API and the React dashboard (Overview,
   Policy Lab, Rules Studio, Evidence, Decision log). One live Opus call (~4k tokens). 230 tests pass.
 
+- **27 Oct ~05:35–06:30, main:** after the instructor's feedback (show the core back-end, not a dashboard), built
+  the Live engine trace (9 steps per decision) and the 25-customer traffic run; made it the first page. Fixed one
+  bug found in the browser check (a property called as a function). 231 tests.
+
 ## 10. Open items and the user's to-dos
 
 - [ ] Push the commits (`git push`); make the repo public, or share it with the judges, before submission.
@@ -1338,7 +1374,8 @@ All times IST, Thu 22 Oct 2026.
 | Live AI decisions (20 customers) | 9 accepted first time, 1 fixed on retry, 0 failed calls; median 3.0 s per call; ~US $0.01 per decision; messages in EN / Hinglish / Punjabi |
 | Prompt-injection defence | Guard flags 37/40 attacks (0/10 false alarms); with a Claude that obeys every attack, 80/80 still sent nothing that breaks a rule |
 | Telegram flow | 5-tap quiz → digital twin from 5,000 customers → browse real products → abandoned-cart offer by Claude, checked by the rules and re-checked at send time → Claim / Not for me / Why me?; 10% live holdout by chat |
-| Tests | 230 passing; lint clean |
+| Tests | 231 passing; lint clean |
+| Live engine | One click shows a decision end to end: event in → scores → trigger → contact checks → all 10 offers with cost, profit and blocking rule → choice → 27+ rule checks → Decision JSON out |
 | Bot | @Dilnazecom_bot, live in the cloud (Render, webhook) on Neon data |
 | Policy Lab (5,000 customers, 14 days, ground truth) | 20% off for everyone: **−₹1,81,079** extra profit (₹2,22,641 of discount to people who'd buy anyway). OfferIQ: **+₹44,073** for ₹9,832 of offer cost (₹5.48 back per ₹1). Holds at 2× discount strength |
 | Fairness | OfferIQ offer-rate gap ≤ 4.3 pp across city tier, gender and age (gender/age never used to target) |

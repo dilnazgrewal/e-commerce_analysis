@@ -235,3 +235,46 @@ def test_offeriq_beats_blanket_discounts_and_reports_fairness(lab_world):
     )
     blanket_2x = next(r for r in stronger["results"] if r["strategy"] == "blanket20")
     assert blanket_2x["extra_orders"] > by["blanket20"]["extra_orders"]
+
+
+# ------------------------------------------------------------------- engine trace (needs the seeded DB)
+
+
+@needs_db
+def test_engine_trace_shows_every_step_and_sends_nothing(monkeypatch):
+    from app.api import engine as engine_api
+    from app.db import make_engine
+
+    eng = make_engine(f"sqlite:///{DB}")
+    monkeypatch.setattr(dashboard, "get_engine", lambda: eng)
+    monkeypatch.setattr(engine_api, "get_engine", lambda: eng)
+    monkeypatch.delenv("DASHBOARD_PASSWORD", raising=False)
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "")
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+    client = TestClient(app)
+    before = dashboard.rows("SELECT COUNT(*) AS n FROM offer_decisions")[0]["n"]
+    for _ in range(5):
+        t = client.post("/api/engine/trace", json={}).json()
+        assert {
+            "event",
+            "customer",
+            "scores",
+            "trigger",
+            "contact_checks",
+            "considered",
+            "decision",
+            "output",
+        } <= set(t)
+        assert len(t["considered"]) == len(POLICY.offers)
+        out = t["output"]
+        assert out["status"] in {"sent", "holdout", "suppressed", "queued"}
+        if out["status"] == "sent":
+            assert all(c["passed"] for c in out["rule_checks"])
+            assert any(o["allowed"] for o in t["considered"]) or t["decision"]["tier"] == "T5"
+    rows = client.post("/api/engine/batch", json={"n": 10}).json()["items"]
+    assert len(rows) == 10
+    assert all(r["checks_passed"] == r["checks_total"] for r in rows if r["status"] == "sent")
+    assert dashboard.rows("SELECT COUNT(*) AS n FROM offer_decisions")[0]["n"] == before  # dry run
+    get_settings.cache_clear()

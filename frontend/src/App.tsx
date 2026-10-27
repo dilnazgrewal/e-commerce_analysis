@@ -1,21 +1,23 @@
 import { useEffect, useState } from 'react'
 import { api, ApiError, getToken, setToken } from './api'
 import Decisions from './pages/Decisions'
+import Engine from './pages/Engine'
 import Evidence from './pages/Evidence'
 import Lab from './pages/Lab'
 import Overview from './pages/Overview'
 import Rules from './pages/Rules'
 
 const PAGES = [
+  { id: 'engine', label: 'Live engine', Page: Engine },
+  { id: 'decisions', label: 'Decision log', Page: Decisions },
   { id: 'overview', label: 'Overview', Page: Overview },
   { id: 'lab', label: 'Policy Lab', Page: Lab },
   { id: 'rules', label: 'Rules Studio', Page: Rules },
   { id: 'evidence', label: 'Evidence', Page: Evidence },
-  { id: 'decisions', label: 'Decision log', Page: Decisions },
 ]
 
 function useHashPage() {
-  const read = () => window.location.hash.replace('#/', '') || 'overview'
+  const read = () => window.location.hash.replace('#/', '') || 'engine'
   const [page, setPage] = useState(read)
   useEffect(() => {
     const on = () => setPage(read())

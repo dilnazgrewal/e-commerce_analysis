@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app import __version__
 from app.api.dashboard import router as dashboard_router
+from app.api.engine import router as engine_router
 from app.config import get_settings
 
 log = logging.getLogger("offeriq.api")
@@ -87,6 +88,7 @@ app.add_middleware(
 
 
 app.include_router(dashboard_router)
+app.include_router(engine_router)
 
 
 def request_bot_running() -> bool:

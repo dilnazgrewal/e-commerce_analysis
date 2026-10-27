@@ -84,7 +84,7 @@ code {
 
 .app {
   display: grid;
-  grid-template-columns: 220px 1fr;
+  grid-template-columns: 220px minmax(0, 1fr);
   min-height: 100vh;
 }
 
@@ -620,4 +620,39 @@ details.section > summary {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* ---------- live engine ---------- */
+
+.step {
+  display: flex;
+  gap: 16px;
+}
+
+.step-n {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+}
+
+.json {
+  background: var(--surface-2);
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 0.82rem;
+  overflow-x: auto;
+  margin: 0;
+  max-height: 420px;
+}
+
+.big {
+  font-size: 1.5rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
 }
