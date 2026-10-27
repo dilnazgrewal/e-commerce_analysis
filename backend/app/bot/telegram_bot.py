@@ -423,6 +423,10 @@ async def on_cart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         now,
     )
     await query.answer("Added to cart 🛒")
+    # One abandoned-cart check per cart: adding another item restarts the timer instead of starting a second
+    # one (three quick adds used to fire three triggers, logging three identical "suppressed" decisions).
+    for pending in context.job_queue.get_jobs_by_name(f"cart:{user.chat_id}"):
+        pending.schedule_removal()
     context.job_queue.run_once(
         cart_job,
         when=CART_TRIGGER_DELAY_S,
