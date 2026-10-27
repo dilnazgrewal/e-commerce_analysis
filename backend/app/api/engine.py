@@ -32,14 +32,16 @@ class TraceRequest(BaseModel):
     trigger: str = "auto"
     use_ai: bool = False
     event: dict | None = None  # a platform event in the input contract; built from recent activity if omitted
-    now: datetime | None = None  # naive IST; defaults to 11:00 today (outside quiet hours)
+    now: datetime | None = None  # naive IST; defaults to now, or 11:00 today during quiet hours
 
 
 def demo_clock(now: datetime | None) -> datetime:
     if now is not None:
         return now.replace(tzinfo=None)
-    today = datetime.now(IST).replace(tzinfo=None)
-    return today.replace(hour=11, minute=0, second=0, microsecond=0)
+    real = datetime.now(IST).replace(tzinfo=None, microsecond=0)
+    if 9 <= real.hour < 21:
+        return real  # the live clock, so the newest bot activity is included
+    return real.replace(hour=11, minute=0, second=0)  # at night, 11:00 today (outside quiet hours)
 
 
 def random_customer() -> str:
@@ -61,7 +63,8 @@ def profile(customer_id: str) -> dict:
 
 
 def input_event(customer_id: str, now: datetime, given: dict | None) -> dict:
-    """The platform's event (input contract). Default: the customer's last add-to-cart, replayed now."""
+    """The platform's event (input contract). Default: the customer's last add-to-cart (bot or history),
+    replayed as if it was left 95 minutes ago, so the cart-abandoned rule can be shown."""
     if given:
         return given
     last = rows(

@@ -956,7 +956,8 @@ dashboard. The user asked for that within an hour; Claude built it as the first 
 
 `POST /api/engine/batch` runs 25 random customers through the rules engine as a burst of platform traffic; any row
 opens its full trace. Both are dry runs: nothing is sent or logged, so testers' contact limits are untouched. The
-engine clock is 11:00 IST today, outside quiet hours.
+engine clock is the real IST time from 09:00 to 21:00, and 11:00 today during quiet hours (changed at ~06:50, so a
+tester's newest bot actions, which are stored as platform events for their twin, appear in the trace).
 
 **Example run (C00368, Harleen Kaur, Amritsar, tier 2):** add-to-cart of a ₹439 item → churn 2%, chance to buy
 53.9%, uplift +10.4 pp, persuadable, active, mostly Electronics → trigger cart abandoned (95 min idle) → contact
