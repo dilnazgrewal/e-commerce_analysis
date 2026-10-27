@@ -152,4 +152,4 @@ The user runs a **main build session** and a **docs session** side by side. Cont
 - [x] 6  React dashboard + API (login; 15 s polling instead of SSE) (`backend/app/api/`, `frontend/src/`)
 - [ ] 7  NL rule editing + dry run ✓, policy simulation (Policy Lab) ✓, versioned policies ✓; campaigns, AI analyst,
        two-way bot chat open (`agent/rule_author.py`, `experiments/policy_lab.py`, `rules/policy_store.py`)
-- [ ] 8  Deploy (container host + Neon + Vercel), classmate test round, README, demo script
+- [x] 8  Deploy (Render + Neon, one container), README with demo script; Live engine page (`api/engine.py`)

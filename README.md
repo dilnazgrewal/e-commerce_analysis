@@ -8,7 +8,46 @@ they are to buy *because of* an offer), picks the cheapest offer likely to work 
 marketing team, lets Claude personalise it, checks every AI choice against the rules before sending, and measures the
 true incremental impact with holdout groups.
 
-> Status: early build (step 0). Setup and usage below will grow as features land.
+## Try it
+
+| | |
+|---|---|
+| **Telegram bot** | [@Dilnazecom_bot](https://t.me/Dilnazecom_bot): send `/start`, take the 5-tap quiz, `/browse`, add to cart |
+| **Marketing dashboard** | https://offeriq-12t1.onrender.com (password from the author). Opens on the **Live engine** |
+| **API docs** | https://offeriq-12t1.onrender.com/docs |
+
+Free hosting: the first visit after 15 idle minutes takes ~30–60 s to wake the server.
+
+### How one decision works
+
+```
+platform event  →  customer scores  →  trigger  →  rules: allowed offers  →  Claude (or rules) chooses + writes
+(add_to_cart)      (churn, uplift,      (cart       (margin, budget,          the message
+                    90-day value)        abandoned)  contact limits)                 │
+                                                                                     ▼
+           measure (holdout, Policy Lab)  ←  Telegram  ←  every rule checked again (27+ checks), else fall back
+```
+
+### 5-minute demo
+
+1. **Live engine** → *Random customer*: one decision in 9 steps, from the event JSON in to the Decision JSON out,
+   with every offer priced and every rule shown. Tick *Let Claude choose* to see the AI tier. *Run 25 customers*
+   shows a burst of platform traffic.
+2. **Telegram**: `/browse` → add to cart → the offer card arrives ~90 s later → *Why me?* → *Claim*.
+3. **Decision log**: the same decision, with its rule checks, the Claude calls and the claim.
+4. **Policy Lab**: 20% off for everyone **loses ₹1,81,079**; OfferIQ **earns ₹44,073** (₹5.48 back per ₹1).
+5. **Rules Studio**: type *"Diwali week: cap electronics at 6%"* → Claude proposes → dry run → *Discard*.
+
+### Headline results
+
+| | |
+|---|---|
+| Synthetic world | 5,000 customers, ~2.0M events, ~26k orders over 12 months; **8/8 realism checks** pass against real data |
+| Churn model | AUC **0.865** on held-out customers |
+| Uplift targeting | top 30% get **1.69×** the average uplift; method confirmed on the real Hillstrom RCT (1.35×) |
+| Policy Lab (14 days, ground truth) | blanket 20%: **−₹1,81,079** · at-risk 15%: +₹10,465 · **OfferIQ: +₹44,073** |
+| Safety | 0 rule violations in sent offers; 12,000 property-test cases; a Claude that obeys every attack still sends nothing that breaks a rule |
+| Tests | **231** passing (`cd backend && uv run pytest`) |
 
 ## Quick start (local)
 
@@ -189,6 +228,33 @@ Also:
 cd backend
 uv run python -m app.bot.telegram_bot     # polling mode; run only ONE copy per bot token
 ```
+
+## Marketing dashboard
+
+React + TypeScript + Recharts, served by the same FastAPI process. Login with `DASHBOARD_PASSWORD`.
+
+| Page | What it is for |
+|---|---|
+| **Live engine** | One decision traced step by step: event in → profile → model scores → trigger → contact checks → **every offer with cost, expected profit and the rule that blocked it** → choice (rules or Claude) → all rule checks → Decision JSON out. Dry runs only |
+| **Decision log** | Every real decision (bot and platform), including the ones where nothing was sent, with its full audit trail |
+| **Overview** | Decisions per day, rule violations in sent offers (0), which tier decided, offer types, bot users and taps |
+| **Policy Lab** | No offers vs 20% off for all vs 15% off at-risk vs OfferIQ on all 5,000 customers, scored against the simulator's ground truth; sliders test the assumption that offers work as calibrated; fairness audit by city tier, gender and age |
+| **Rules Studio** | Change the rules with a form or in plain English (Claude Opus proposes, schema-checked, margin warnings), dry run, then **Approve & publish**; versioned, and the bot uses a new version within 15 s |
+| **Evidence** | Model scorecard, Qini curve on the real Hillstrom experiment, measured offer effects, synthetic vs real data, and honest limits |
+
+```bash
+cd backend && uv run uvicorn app.main:app --reload    # API on :8000
+cd frontend && npm install && npm run dev             # dashboard on :5173 (proxies /api)
+```
+
+## Deployment
+
+One Docker container on **Render** (free) runs the API, the built dashboard and the Telegram bot in **webhook**
+mode; data lives in **Neon** Postgres (free). See [Dockerfile](Dockerfile) and [render.yaml](render.yaml).
+- Set `DATABASE_URL`, `TELEGRAM_BOT_TOKEN`, `ANTHROPIC_API_KEY` and `DASHBOARD_PASSWORD` in Render;
+  `TELEGRAM_WEBHOOK_SECRET` is generated and the webhook URL comes from Render automatically.
+- `scripts/export_cloud_db.py` copies the local database to Neon (browsing events trimmed to the last 14 days).
+- Secrets live only in `.env` locally and in Render's environment, never in git.
 
 ## Project guide
 

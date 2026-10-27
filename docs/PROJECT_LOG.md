@@ -1341,6 +1341,10 @@ All times IST, Thu 22 Oct 2026.
 
 - **27 Oct ~07:00, main:** fixed the cloud-only browse/cart failure (§8); bot tests pass.
 
+- **27 Oct ~14:45, main:** README brought up to date for submission: live links, the decision flow, a 5-minute
+  demo script, headline results, the dashboard pages and deployment (it still said "step 0"). CLAUDE.md step 8
+  ticked; `.env.example` dashboard note updated.
+
 ## 10. Open items and the user's to-dos
 
 - [ ] Push the commits (`git push`); make the repo public, or share it with the judges, before submission.
