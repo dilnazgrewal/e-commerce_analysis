@@ -1217,6 +1217,7 @@ cd ../frontend && npm install && npm run dev                # dashboard → http
 | 26 Oct ~13:20 | Policy Lab first used the dice simulator: results jumped by tens of thousands of ₹ between seeds | Expected values from the simulator's own equations; the dice version is kept as a test cross-check |
 | 26 Oct ~13:40 | Expected orders for blanket 20% were ~10% above the simulator | The simulator ends the boost at the first order (the coupon is used); the formula now does the same. Agreement within ~1.5% |
 | 26 Oct ~15:10 | Dashboard charts showed dots but no lines in the app's browser pane | Recharts animates lines by stroke-dash; the animation stalls in a background pane. Animations are off (`isAnimationActive={false}`) |
+| 27 Oct ~07:00 | In the cloud bot, tapping a /browse category did nothing (reported by the user). Cause: `store.add_events` saved events with pandas `to_sql`, which sends all-empty columns as text; Postgres rejected text for the integer `points` column (SQLite had accepted it). The same function records cart adds and claims, so the cart and abandoned-cart offers were affected too | Events are inserted through the typed `events` table. Verified against Neon inside a rolled-back transaction: browse events, a sent decision (L5 persist) and a claim order all write correctly; nothing was left behind |
 
 ## 9. Timeline
 
@@ -1336,6 +1337,8 @@ All times IST, Thu 22 Oct 2026.
 - **27 Oct ~05:35–06:30, main:** after the instructor's feedback (show the core back-end, not a dashboard), built
   the Live engine trace (9 steps per decision) and the 25-customer traffic run; made it the first page. Fixed one
   bug found in the browser check (a property called as a function). 231 tests.
+
+- **27 Oct ~07:00, main:** fixed the cloud-only browse/cart failure (§8); bot tests pass.
 
 ## 10. Open items and the user's to-dos
 

@@ -11,7 +11,7 @@ from sqlalchemy import Engine, inspect, text
 from sqlmodel import Session
 
 from app.db import init_db
-from app.models import BotUser, Feedback
+from app.models import BotUser, Event, Feedback
 from app.rules.decide import Decision
 from app.rules.schema import Policy
 
@@ -122,26 +122,34 @@ def product(engine: Engine, product_id: str) -> dict | None:
 
 
 def add_events(engine: Engine, customer_id: str, rows: list[dict], now: datetime) -> None:
-    """Live behaviour from the bot, in the same event format the simulator and a real platform use."""
-    frame = pd.DataFrame(
-        [
-            {
-                "event_id": f"TG-{uuid.uuid4().hex[:16]}",
-                "customer_id": customer_id,
-                "ts": now,
-                "device": "telegram",
-                "product_id": None,
-                "price_inr": None,
-                "session_id": None,
-                "order_id": None,
-                "points": None,
-                "query": None,
-                **r,
-            }
-            for r in rows
-        ]
-    )
-    frame.to_sql("events", engine, if_exists="append", index=False)
+    """Live behaviour from the bot, in the same event format the simulator and a real platform use.
+
+    Inserted through the typed table, not pandas: pandas sends all-empty columns as text, which Postgres
+    rejects for integer columns such as `points` (SQLite accepted it, so this only failed in the cloud).
+    """
+    records = [
+        {
+            "event_id": f"TG-{uuid.uuid4().hex[:16]}",
+            "customer_id": customer_id,
+            "ts": now,
+            "device": "telegram",
+            "product_id": None,
+            "price_inr": None,
+            "session_id": None,
+            "order_id": None,
+            "points": None,
+            "query": None,
+            **r,
+        }
+        for r in rows
+    ]
+    if not records:
+        return
+    for record in records:  # numpy ints from pandas-read products would not bind cleanly either
+        if record["price_inr"] is not None:
+            record["price_inr"] = int(record["price_inr"])
+    with engine.begin() as conn:
+        conn.execute(Event.__table__.insert(), records)
 
 
 def last_cart_item(engine: Engine, customer_id: str, since: datetime) -> dict | None:
